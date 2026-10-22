@@ -7,6 +7,7 @@ use App\Services\JwtService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -15,6 +16,8 @@ class AuthController extends Controller
      */
     public function login(Request $request, JwtService $jwt): JsonResponse
     {
+        $this->normalizarEmail($request);
+
         $credenciales = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
@@ -26,14 +29,32 @@ class AuthController extends Controller
             return response()->json(['message' => 'Credenciales inválidas.'], 401);
         }
 
-        $emitido = $jwt->emitir($user);
+        return response()->json($this->sesion($user, $jwt));
+    }
 
-        return response()->json([
-            'token' => $emitido['token'],
-            'token_type' => 'Bearer',
-            'expires_in' => $emitido['expires_in'],
-            'user' => $user,
+    /**
+     * Crea una cuenta de cliente y la deja con la sesión iniciada (mismo formato que el login).
+     */
+    public function register(Request $request, JwtService $jwt): JsonResponse
+    {
+        $this->normalizarEmail($request);
+
+        $datos = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:8', 'max:72'],
         ]);
+
+        // forceCreate porque "rol" no es asignable en masa. El rol de una cuenta nueva siempre es cliente:
+        // nunca se toma de la petición. El cast "hashed" de User cifra la contraseña.
+        $user = User::forceCreate([
+            'name' => $datos['name'],
+            'email' => $datos['email'],
+            'password' => $datos['password'],
+            'rol' => User::ROL_CLIENTE,
+        ]);
+
+        return response()->json($this->sesion($user, $jwt), 201);
     }
 
     /**
@@ -55,5 +76,32 @@ class AuthController extends Controller
     public function perfil(Request $request): JsonResponse
     {
         return response()->json($request->user());
+    }
+
+    /**
+     * @return array{token: string, token_type: string, expires_in: int, user: User}
+     */
+    private function sesion(User $user, JwtService $jwt): array
+    {
+        $emitido = $jwt->emitir($user);
+
+        return [
+            'token' => $emitido['token'],
+            'token_type' => 'Bearer',
+            'expires_in' => $emitido['expires_in'],
+            'user' => $user,
+        ];
+    }
+
+    /**
+     * Los emails se guardan y se buscan en minúsculas, así "Ana@x.com" y "ana@x.com" son la misma cuenta.
+     */
+    private function normalizarEmail(Request $request): void
+    {
+        $email = $request->input('email');
+
+        if (is_string($email)) {
+            $request->merge(['email' => Str::lower(trim($email))]);
+        }
     }
 }

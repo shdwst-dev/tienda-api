@@ -20,20 +20,20 @@ class PedidoSeeder extends Seeder
 
         $pedidosPorCliente = [
             'cliente1@tienda.com' => [
-                ['entregado', [['Laptop Lenovo IdeaPad 15', 1], ['Mouse Logitech M185', 1]]],
-                ['pendiente', [['Audífonos Sony WH-CH520', 2]]],
+                ['enviado', 'Av. Universidad 123, Col. Centro, Querétaro, Qro.', [['Laptop Lenovo IdeaPad 15', 1], ['Mouse Logitech M185', 1]]],
+                ['pendiente', 'Av. Universidad 123, Col. Centro, Querétaro, Qro.', [['Audífonos Sony WH-CH520', 2]]],
             ],
             'cliente2@tienda.com' => [
-                ['enviado', [['Smartphone Samsung Galaxy A55', 1]]],
-                ['pendiente', [['Teclado mecánico Redragon Kumara', 1], ['Mouse Logitech M185', 2]]],
+                ['pagado', 'Calle Hidalgo 45, Col. Jurica, Querétaro, Qro.', [['Smartphone Samsung Galaxy A55', 1]]],
+                ['cancelado', 'Calle Hidalgo 45, Col. Jurica, Querétaro, Qro.', [['Teclado mecánico Redragon Kumara', 1], ['Mouse Logitech M185', 2]]],
             ],
         ];
 
         foreach ($pedidosPorCliente as $email => $pedidos) {
             $user = User::where('email', $email)->firstOrFail();
 
-            foreach ($pedidos as [$estado, $lineas]) {
-                $pedido = Pedido::create(['user_id' => $user->id, 'estado' => $estado]);
+            foreach ($pedidos as [$estado, $direccion, $lineas]) {
+                $pedido = Pedido::create(['user_id' => $user->id, 'estado' => $estado, 'direccion_envio' => $direccion]);
                 $total = 0;
 
                 foreach ($lineas as [$nombre, $cantidad]) {

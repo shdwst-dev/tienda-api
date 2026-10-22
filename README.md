@@ -1,7 +1,8 @@
 # Tienda API — Seguridad de API con Laravel
 
-Tarea de Seguridad Informática (UPQ). Mini tienda de aparatos electrónicos: API REST en **Laravel 13 + PostgreSQL**
-con un frontend simple en Blade + `fetch()` (sin Vite ni npm).
+Tarea de Seguridad Informática (UPQ). Mini tienda de aparatos electrónicos (**TechStore**): API REST en
+**Laravel 13 + PostgreSQL** con una tienda web en Blade + `fetch()` (sin Vite ni npm): registro e inicio de sesión,
+catálogo con búsqueda, carrito, "Mis pedidos" y panel de administración.
 
 El proyecto se construye por etapas. Cada concepto de seguridad vive en su propia rama, se une a `master` con
 `git merge --no-ff` y queda marcado con un tag, así que se puede viajar entre etapas con `git checkout <tag>`:
@@ -13,6 +14,7 @@ El proyecto se construye por etapas. Cada concepto de seguridad vive en su propi
 | `v3-jwt` | `02-jwt` | JWT: login con token firmado, expiración y revocación en el logout |
 | `v4-bola-roles` | `03-bola-roles` | BOLA/IDOR (`PedidoPolicy`), `user_id` tomado del token y roles (`rol:admin`) |
 | `v5-rate-limiter` | `04-rate-limiter` | Rate limiter por usuario/API key (nunca por IP) con respuesta `429` en JSON y `Retry-After` |
+| `v6-ui-tienda` | `05-ui-tienda` | Tienda web (TechStore) y API ampliada: registro, categorías, búsqueda, dirección de envío, "Mis pedidos" y panel admin |
 
 ## Puesta en marcha
 
@@ -54,7 +56,7 @@ php artisan migrate:fresh --seed
 php artisan serve        # http://127.0.0.1:8000
 ```
 
-El frontend está en `http://127.0.0.1:8000/` y la API en `http://127.0.0.1:8000/api`.
+La tienda web está en `http://127.0.0.1:8000/` y la API en `http://127.0.0.1:8000/api`.
 Los ejemplos de abajo usan `curl` y `jq` (opcional, solo para ver el JSON bonito).
 
 ### Usuarios de prueba
@@ -64,22 +66,29 @@ Contraseña de todos: `password`.
 | Email | Rol | Pedidos |
 |-------|-----|---------|
 | `admin@tienda.com` | `admin` | — |
-| `cliente1@tienda.com` | `cliente` | 1 y 2 |
-| `cliente2@tienda.com` | `cliente` | 3 y 4 |
+| `cliente1@tienda.com` | `cliente` | 1 (enviado) y 2 (pendiente) |
+| `cliente2@tienda.com` | `cliente` | 3 (pagado) y 4 (cancelado) |
 
-Además hay 8 productos electrónicos (ids 1 a 8). `migrate:fresh --seed` deja todo como al inicio.
+Además hay 12 productos electrónicos en 7 categorías (ids 1 a 12). También se puede crear una cuenta nueva desde
+"Regístrate aquí". `migrate:fresh --seed` deja todo como al inicio.
 
 ### Endpoints
 
 | Método | Ruta | Qué hace | Acceso | Límite |
 |--------|------|----------|--------|--------|
 | POST | `/api/login` | Valida credenciales y regresa un JWT y el usuario | API key | `login`: 5/min por email + API key |
+| POST | `/api/register` | Crea una cuenta de cliente y regresa un JWT | API key | `api`: 60/min |
 | POST | `/api/logout` | Revoca el token que se usó en la petición | API key + JWT | `api`: 60/min |
 | GET | `/api/perfil` | Datos del dueño del token | API key + JWT | `api`: 60/min |
-| GET | `/api/productos` | Lista de productos | API key | `api`: 60/min |
+| GET | `/api/productos?buscar=&categoria=` | Catálogo, con búsqueda y filtro por categoría | API key | `api`: 60/min |
 | POST | `/api/productos` | Crea un producto | API key + JWT + rol `admin` | `api`: 60/min |
+| PUT | `/api/productos/{id}` | Edita un producto | API key + JWT + rol `admin` | `api`: 60/min |
+| DELETE | `/api/productos/{id}` | Elimina un producto (`409` si ya está en pedidos) | API key + JWT + rol `admin` | `api`: 60/min |
+| GET | `/api/pedidos` | "Mis pedidos" (el admin recibe los de todos) | API key + JWT | `api`: 60/min |
 | GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | API key + JWT (solo el dueño o un admin) | `api`: 60/min |
-| POST | `/api/pedidos` | Crea un pedido (`items`) a nombre del dueño del token | API key + JWT | `pedidos`: 3/min por usuario |
+| POST | `/api/pedidos` | Crea un pedido (`direccion_envio` + `items`) a nombre del dueño del token | API key + JWT | `pedidos`: 3/min por usuario |
+| PATCH | `/api/pedidos/{id}/estado` | Cambia el estado del pedido | API key + JWT + rol `admin` | `api`: 60/min |
+| GET | `/api/usuarios` | Lista de usuarios | API key + JWT + rol `admin` | `api`: 60/min |
 
 El límite `api` es por usuario del token (o por API key si no hay token válido). Ningún límite usa la IP.
 
@@ -88,41 +97,10 @@ así que no hay Sanctum ni Passport).
 
 ### Despliegue en una VM Ubuntu con Cloudflare Tunnel
 
-```bash
-git clone <repo> tienda-api && cd tienda-api
-composer install --no-dev --optimize-autoloader
-cp .env.example .env
-php artisan key:generate
-# edita .env con los valores de abajo
-php artisan migrate:fresh --seed --force
-php artisan serve --host=127.0.0.1 --port=8000
-cloudflared tunnel --url http://localhost:8000      # en otra terminal; imprime la URL pública https://....trycloudflare.com
-```
-
-Variables del `.env` de la VM:
-
-```dotenv
-APP_ENV=production
-APP_DEBUG=false                 # con true los errores 500 muestran trace y rutas del servidor
-APP_KEY=                        # lo llena php artisan key:generate
-APP_URL=http://localhost:8000
-
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=tienda_api
-DB_USERNAME=tu_usuario
-DB_PASSWORD=tu_password
-
-CACHE_STORE=database            # contadores del rate limiter y lista negra de JWT
-
-API_KEY=                        # openssl rand -hex 24
-JWT_SECRET=                     # openssl rand -hex 32 (mínimo 32 caracteres)
-JWT_TTL=30                      # minutos de vida del token
-```
-
-Con el túnel, todas las peticiones llegan a Laravel desde `127.0.0.1`: por eso el rate limiter usa el usuario o la
-API key y nunca la IP. Para dar acceso a quien revise la API desde Postman, pásale la URL del túnel y la `API_KEY`.
+Los pasos exactos (paquetes, PostgreSQL, `.env` con todas las variables, `cloudflared`) están en
+[`docs/DEPLOY.md`](docs/DEPLOY.md). Con el túnel, todas las peticiones llegan a Laravel desde `127.0.0.1`: por eso el
+rate limiter usa el usuario o la API key y nunca la IP, y `bootstrap/app.php` confía en `X-Forwarded-Proto/Host`
+(`trustProxies(at: '*')`) para generar enlaces `https`.
 
 ---
 
@@ -179,6 +157,9 @@ curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8000/api/productos?[1
 
 ### Cómo demostrarlo en vivo
 
+Haz `git checkout v1-base` (ese tag trae la pantalla técnica de la etapa 1; la tienda actual está en `master`). Al
+terminar, `git checkout master`.
+
 1. Abre `http://127.0.0.1:8000/`: se ve la lista de productos y la etiqueta **v1-base · sin seguridad**.
 2. Entra como `cliente1` y consulta el pedido `1` (suyo) con "Ver pedido por id".
 3. Cambia el id a `3` (de `cliente2`): **se ve completo**. Eso es BOLA/IDOR.
@@ -201,8 +182,13 @@ Una API key identifica a la **aplicación cliente**, no a la persona. No sustitu
 etapa 3) y tiene límites que conviene decir en la exposición:
 
 - Es un secreto compartido: si se filtra, vale para todos. Se rota cambiando `API_KEY` en el `.env`.
-- En un navegador no puede ser secreta (DevTools la muestra). Por eso el frontend **no** la trae incrustada en el
-  HTML (cualquiera que abra el sitio la vería): se pega a mano en el campo "API key" y queda en `localStorage`.
+- En un navegador no puede ser secreta. La tienda web la manda sola: va en un `<meta name="api-key">` de la página.
+  Sale de `API_KEY` en el `.env` (con `config('services.api_key')`; no está escrita en ningún archivo del repo) y
+  cualquiera que abra la tienda la ve en "ver código fuente". Por eso la API key **identifica a la aplicación, no es
+  un secreto ni una contraseña**: frena a bots y clientes que no la conocen, pero la seguridad real la dan el JWT,
+  los roles y el rate limiter. (En el tag `v2-api-key` la pantalla tenía un campo para pegarla.)
+- Mejora futura: un **BFF** (*backend for frontend*): rutas propias de la web que llaman a la API por dentro, con la
+  llave guardada solo en el servidor, para que nunca llegue al navegador.
 
 ### Cómo funciona
 
@@ -220,7 +206,7 @@ etapa 3) y tiene límites que conviene decir en la exposición:
 - `bootstrap/app.php`: `$middleware->api(prepend: [ValidateApiKey::class])`.
 - `config/services.php`: `'api_key' => env('API_KEY')`.
 - `.env` y `.env.example`: variable `API_KEY`.
-- `resources/views/tienda.blade.php`: campo "API key" y header `X-API-KEY` en cada `fetch()`.
+- `resources/views/tienda.blade.php`: el frontend manda el header `X-API-KEY` en cada `fetch()`.
 
 ### Pruebas con curl (falla vs. pasa)
 
@@ -252,11 +238,11 @@ llave, así que sin la llave ni siquiera se puede "tantear" qué hay en la API.
 
 ### Cómo demostrarlo en vivo
 
-1. Abre el frontend sin llave: la tabla de productos no carga y el panel muestra `401 API key ausente o inválida`.
-2. Escribe una llave equivocada en el campo "API key": sigue el `401`.
-3. Pega la correcta: aparecen los productos y todo lo demás vuelve a funcionar.
-4. En Postman: `GET /api/productos` sin el header da `401`; con `X-API-KEY` da `200`.
-5. Muestra el código: una línea en `bootstrap/app.php` y los 15 renglones de `ValidateApiKey`.
+1. En Postman, carpeta "1 · API key": `Productos · sin API key` da `401`, `API key incorrecta` da `401` y con la llave
+   correcta da `200`.
+2. Abre la tienda: carga sola porque el navegador manda la llave. Muestra "ver código fuente": ahí está el
+   `<meta name="api-key">`. Explica por qué la API key identifica a la app y no es un secreto.
+3. Muestra el código: una línea en `bootstrap/app.php` y los 15 renglones de `ValidateApiKey`.
 
 ---
 
@@ -297,7 +283,7 @@ de otra persona, y cualquier usuario con token puede crear productos. Saber *qui
    del mismo usuario siguen vivas.
 5. `GET /api/perfil` ya no recibe `user_id`: usa al usuario del token.
 6. El frontend guarda el token en `sessionStorage` (se borra al cerrar la pestaña) y lo manda en cada `fetch()`.
-   Pinta los datos de la API con `textContent`, nunca con `innerHTML`, para que un XSS no pueda robar el token.
+   Todo lo que viene de la API se escapa antes de pintarlo (`escapeHtml`) para que un XSS no pueda robar el token.
 
 Detalles que conviene mencionar:
 
@@ -345,7 +331,7 @@ curl -i -H 'X-API-KEY: TU_API_KEY' \
 # FALLA: crear un pedido sin token  ->  401
 curl -i -X POST http://127.0.0.1:8000/api/pedidos \
   -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
-  -d '{"user_id":2,"items":[{"producto_id":6,"cantidad":1}]}'
+  -d '{"direccion_envio":"Av. Universidad 123, Querétaro","items":[{"producto_id":6,"cantidad":1}]}'
 
 # PASA: con el token  ->  200 con el usuario DEL TOKEN (aunque pidas ?user_id=1 lo ignora)
 curl -s -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN" \
@@ -354,7 +340,7 @@ curl -s -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN" \
 # PASA: crear un pedido con el token  ->  201
 curl -s -X POST http://127.0.0.1:8000/api/pedidos \
   -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"user_id":2,"items":[{"producto_id":6,"cantidad":1}]}' | jq
+  -d '{"direccion_envio":"Av. Universidad 123, Querétaro","items":[{"producto_id":6,"cantidad":1}]}' | jq
 
 # Logout  ->  200, el jti del token entra a la lista negra
 curl -s -X POST -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN" \
@@ -369,17 +355,15 @@ Token expirado: pon `JWT_TTL=1` en el `.env` (el servidor se reinicia solo al ca
 
 ### Cómo demostrarlo en vivo
 
-1. En el frontend, sin sesión: "Ver mi perfil" y "Consultar" pedido responden `401 Falta el token`. La lista de
-   productos sí carga porque `GET /api/productos` es pública.
-2. Entra como `cliente1`: aparece la tarjeta **Token JWT** con los claims. Explica `sub`, `rol`, `iat`, `exp` y `jti`.
-3. "Ver mi perfil" responde con el usuario del token; "Crear pedido" responde `201`.
-4. Copia el token a Postman: úsalo en `GET /api/perfil` (`200`), cámbiale un carácter (`401 Token inválido`) y
-   quítale el header (`401 Falta el token`).
-5. Haz logout en el frontend y vuelve a mandar el token copiado desde Postman: `401 Token revocado`. Para ver la
-   lista negra: `select key from cache where key like '%jwt:revocado%';`.
-6. Entra en otra pestaña con el mismo usuario: su sesión no se afecta por el logout de la primera (revocación por sesión).
-7. Código para mostrar: `AuthenticateJwt` (los pasos en orden) y `JwtService`.
-8. Cierra con el hueco que queda: con el token de `cliente1`, `GET /api/pedidos/3` (de `cliente2`) todavía responde `200`.
+1. En la tienda, sin sesión solo existe la pantalla de inicio de sesión: no se ve nada del catálogo ni de pedidos.
+   Entra como `cliente1` y se abre el catálogo.
+2. En Postman, carpeta "2 · JWT", en orden: `Login cliente1` (guarda el token), `Perfil · token válido` (`200`),
+   `Perfil · sin token` (`401 Falta el token`), `Perfil · token falsificado` (`401 Token inválido`). Pega el token en
+   jwt.io para mostrar `sub`, `rol`, `iat`, `exp` y `jti`.
+3. `Logout` (`200`) y luego `Perfil · token revocado` (`401 Token revocado`). En la tienda, "Cerrar sesión" hace lo
+   mismo: revoca el token en el servidor. Para ver la lista negra: `select key from cache where key like '%jwt:revocado%';`.
+4. Entra con el mismo usuario en otra ventana: su sesión no se afecta por el logout de la primera (revocación por sesión).
+5. Código para mostrar: `AuthenticateJwt` (los pasos en orden) y `JwtService`.
 
 ---
 
@@ -456,30 +440,30 @@ curl -s -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $ADMIN" http://127.
 # FALLA: un cliente intenta crear un producto  ->  403 "No tienes permiso para esta acción."
 curl -i -X POST http://127.0.0.1:8000/api/productos \
   -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Webcam HD","descripcion":"1080p","precio":599,"stock":12}'
+  -d '{"nombre":"Webcam HD","descripcion":"1080p","categoria":"Periféricos","precio":599,"stock":12}'
 
 # PASA: el admin crea el producto  ->  201
 curl -s -X POST http://127.0.0.1:8000/api/productos \
   -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Webcam HD","descripcion":"1080p","precio":599,"stock":12}' | jq
+  -d '{"nombre":"Webcam HD","descripcion":"1080p","categoria":"Periféricos","precio":599,"stock":12}' | jq
 
 # Ataque neutralizado: cliente1 manda user_id 3 en el body, pero el pedido queda a su nombre  ->  {"id":5,"user_id":2}
 curl -s -X POST http://127.0.0.1:8000/api/pedidos \
   -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
-  -d '{"user_id":3,"items":[{"producto_id":6,"cantidad":1}]}' | jq -c '{id, user_id}'
+  -d '{"user_id":3,"direccion_envio":"Av. Universidad 123, Querétaro","items":[{"producto_id":6,"cantidad":1}]}' | jq -c '{id, user_id}'
 ```
 
 ### Cómo demostrarlo en vivo
 
-1. En el frontend entra como `cliente1` y consulta el pedido `1`: `200`. Cambia el id a `3`: **`403`** (en la etapa 1
-   este mismo paso mostraba el pedido completo de otra persona).
-2. Cierra sesión y entra como `admin`: el pedido `3` ahora sí se ve. El admin ve todos.
-3. Como `cliente1`, "Crear producto" responde `403 No tienes permiso para esta acción.`; como `admin`, `201`, y el
-   producto aparece en la tabla. Que el botón esté visible no importa: quien decide es el servidor.
-4. En Postman, con el token de `cliente1`, `POST /api/pedidos` con `"user_id": 3` en el body: la respuesta trae
-   `"user_id": 2`, el del token.
-5. Código para mostrar: `PedidoPolicy`, la línea `Gate::authorize('view', $pedido)` y `RequireRole`.
-6. Extra: el rol sale de la base de datos. Con un token de admin vigente, ejecuta
+1. En la tienda entra como `cliente1`: "Mis pedidos" muestra solo sus 2 pedidos y no existe la pestaña
+   Administración. Cierra sesión y entra como `admin`: aparece **Administración** con los pedidos de todos los clientes
+   y la lista de usuarios. Aunque la pestaña esté oculta para los clientes, quien decide es el servidor.
+2. En Postman, carpeta "3 · BOLA/IDOR y roles", en orden: `Pedido 1 · propio` (`200`), `Pedido 3 · de otro usuario`
+   (**`403`**; en la etapa 1 mostraba el pedido completo de otra persona), `Crear pedido` con `user_id` ajeno en el
+   body (`201`, queda a nombre del token), `Crear producto · cliente` (`403`), y con el admin: `Pedido 3` (`200`) y
+   `Crear producto` (`201`).
+3. Código para mostrar: `PedidoPolicy`, la línea `Gate::authorize('view', $pedido)` y `RequireRole`.
+4. Extra: el rol sale de la base de datos. Con un token de admin vigente, ejecuta
    `update users set rol = 'cliente' where email = 'admin@tienda.com';` y repite `POST /api/productos`: ahora da
    `403`. Para dejarlo como estaba: `update users set rol = 'admin' where email = 'admin@tienda.com';`.
 
@@ -553,8 +537,8 @@ Cada ruta usa **un solo** limitador: `login` y `pedidos` sustituyen al general c
 - `bootstrap/app.php`: `throttleApi()` y el orden de los middleware (`appendToPriorityList`).
 - `app/Services/JwtService.php`: `usuarioDeToken()`, la llave por usuario del limitador.
 - `app/Http/Middleware/AuthenticateJwt.php`: ya no implementa `AuthenticatesRequests`; el orden se declara en `bootstrap/app.php`.
-- `resources/views/tienda.blade.php`: aviso con el mensaje del `429` y cuenta regresiva, headers de límite en el panel de
-  respuesta y la tarjeta "Probar el rate limiter".
+- `resources/views/tienda.blade.php`: avisos con el mensaje del `429` (pantalla técnica de esa etapa; la tienda actual
+  muestra el mismo mensaje en un aviso).
 - `docs/tienda-api.postman_collection.json` (nuevo): colección de Postman.
 
 ### Pruebas con curl (falla vs. pasa)
@@ -582,12 +566,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/api/login
 # FALLA: 4 pedidos seguidos de cliente1  ->  201 201 201 429
 curl -s -o /dev/null -w '%{http_code}\n' -X POST 'http://127.0.0.1:8000/api/pedidos?[1-4]' \
   -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
-  -d '{"items":[{"producto_id":6,"cantidad":1}]}'
+  -d '{"direccion_envio":"Av. Universidad 123, Querétaro","items":[{"producto_id":6,"cantidad":1}]}'
 
 # PASA: cliente2 (misma IP) todavía puede crear su pedido  ->  201
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/api/pedidos \
   -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN2" -H 'Content-Type: application/json' \
-  -d '{"items":[{"producto_id":6,"cantidad":1}]}'
+  -d '{"direccion_envio":"Av. Universidad 123, Querétaro","items":[{"producto_id":6,"cantidad":1}]}'
 
 # FALLA: 65 peticiones seguidas de cliente1 a la API  ->  60 x 200 y 5 x 429
 curl -s -o /dev/null -w '%{http_code}\n' -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" \
@@ -600,26 +584,113 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-API-KEY: TU_API_KEY' \
 
 ### Colección de Postman
 
-`docs/tienda-api.postman_collection.json` trae los 7 endpoints en 4 carpetas (una por concepto) y cada request incluye
-tests que verifican el código esperado (`401`, `403`, `429`...).
+`docs/tienda-api.postman_collection.json` trae todos los endpoints en 5 carpetas (una por concepto y una para la
+tienda) y cada request incluye tests que verifican el código esperado (`401`, `403`, `429`...).
 
 1. Postman → **Import** → el archivo.
 2. En las variables de la colección: `base_url` (por omisión `http://127.0.0.1:8000`; con el túnel, la URL
-   `https://....trycloudflare.com` sin `/` al final) y `api_key`. `token` y `user_id` se llenan solas con los requests de Login.
+   `https://....trycloudflare.com` sin `/` al final) y `api_key` (la que viene es solo un ejemplo: pon la de tu `.env`).
+   `token`, `user_id` y `producto_id` se llenan solas.
 3. **Run collection** en orden: todo debe salir en verde. Los 3 requests de la carpeta "4 · Rate limiter" son para
    repetirlos (Runner con 6, 4 y 61 iteraciones) hasta ver el `429`.
 
 ### Cómo demostrarlo en vivo
 
 1. Antes de empezar: `php artisan cache:clear` para dejar los contadores en cero.
-2. Frontend, entra como `cliente1` y pulsa **Crear pedido** cuatro veces seguidas: los 3 primeros dan `201` (el panel
-   muestra `X-RateLimit-Remaining: 2, 1, 0`) y el cuarto da `429`: aparece un aviso arriba con el mensaje y una cuenta
-   regresiva, y el panel muestra `Retry-After`.
-3. Tarjeta **Probar el rate limiter**: `GET /api/productos` × 65 termina en `200 × 60 · 429 × 5`.
-4. Misma tarjeta con **login** × 8: `401 × 5 · 429 × 3`. Mientras tanto la sesión real sigue funcionando: el bloqueo es
-   del email falso, no de la API.
-5. **No usa la IP**: con `cliente1` ya bloqueado en pedidos, entra como `cliente2` (o usa Postman con otro token):
-   puede crear pedidos aunque toda la conexión llegue desde `127.0.0.1` por el túnel.
-6. En Postman, Runner sobre "Listar productos" con 61 iteraciones: la última es `429` con `Retry-After`.
-7. Los contadores están en la base: `select key, expiration from cache;` (las llaves van hasheadas). `php artisan cache:clear` los borra.
-8. Código para mostrar: `AppServiceProvider` (los tres limitadores) y `routes/api.php` (qué ruta usa cuál).
+2. En la pantalla de inicio de sesión escribe la contraseña mal **6 veces** seguidas: del sexto intento aparece el
+   aviso "Demasiados intentos de inicio de sesión. Intenta de nuevo en N segundos."
+3. Entra como `cliente1`, agrega algo al carrito y confirma el pedido **4 veces** seguidas: el cuarto avisa "Demasiados
+   pedidos seguidos..." y el carrito no se pierde.
+4. **No usa la IP**: con `cliente1` ya bloqueado, abre otra ventana (incógnito) y entra como `cliente2`: puede comprar
+   aunque toda la conexión llegue desde `127.0.0.1` por el túnel.
+5. En Postman, carpeta "4 · Rate limiter" (Runner con 6, 4 y 61 iteraciones): `429` en JSON con el header `Retry-After`.
+6. Los contadores están en la base: `select key, expiration from cache;` (las llaves van hasheadas). `php artisan cache:clear` los borra.
+7. Código para mostrar: `AppServiceProvider` (los tres limitadores) y `routes/api.php` (qué ruta usa cuál).
+
+---
+
+## Etapa 6 — Tienda web y API ampliada (`v6-ui-tienda`, rama `05-ui-tienda`)
+
+La pantalla técnica se sustituyó por una tienda normal (**TechStore**), sin términos técnicos a la vista: sin API key,
+token, JSON ni códigos HTTP. Los errores salen como avisos en español ("No tienes permiso para ver este pedido",
+"Demasiadas peticiones, intenta de nuevo en 40 segundos").
+
+### Pantallas
+
+Inicio de sesión y registro · Catálogo (búsqueda y categorías) · Carrito (cantidades, dirección de envío, total) ·
+Mis pedidos (estado Pendiente, Pagado, Enviado o Cancelado) · Administración, solo admin: Productos (agregar, editar,
+eliminar), Pedidos de clientes (cambiar el estado) y Usuarios.
+
+### Cómo está hecha
+
+- `resources/views/tienda.blade.php` (HTML), `public/assets/styles.css` y `public/assets/app.js`: sin Vite ni npm.
+  El `<meta name="api-key">` lleva la API key desde el `.env` (ver la etapa 2 sobre por qué no es un secreto).
+- El token JWT vive en `sessionStorage` y se revoca en el servidor al cerrar sesión. Si vence, la tienda vuelve al
+  inicio de sesión con un aviso.
+- Todo texto que viene de la API se escapa antes de pintarlo (`escapeHtml`): un nombre, una descripción o una dirección
+  con HTML o `<script>` se ve como texto y no se ejecuta.
+- Los mensajes de validación están en español (`lang/es`, `APP_LOCALE=es`).
+
+### Endpoints nuevos y cómo se protegen
+
+| Endpoint | Protección |
+|----------|------------|
+| `POST /api/register` | API key + límite `api`. El rol **siempre** es `cliente`: un `"rol":"admin"` en el body se ignora. Email en minúsculas y único; contraseña de 8 a 72 caracteres |
+| `GET /api/productos?buscar=&categoria=` | API key. Los `%` y `_` de la búsqueda se escapan; todo va con parámetros enlazados (sin SQL injection) |
+| `GET /api/pedidos` | API key + JWT. El filtro por dueño va **dentro de la consulta**: un cliente solo recibe lo suyo; el admin recibe todo, con el cliente |
+| `POST /api/productos`, `PUT` y `DELETE /api/productos/{id}`, `PATCH /api/pedidos/{id}/estado`, `GET /api/usuarios` | API key + JWT + `rol:admin`. El rol se revisa **antes** del route model binding: un cliente recibe `403` exista o no el id (no se puede "tantear") |
+| `DELETE /api/productos/{id}` | `409` si el producto ya está en pedidos (no se pierde el historial) |
+| `PATCH /api/pedidos/{id}/estado` | Solo `pendiente`, `pagado`, `enviado` o `cancelado`. Al cancelar, las piezas regresan al inventario y un pedido cancelado no se reactiva |
+| `POST /api/pedidos` | Ahora exige `direccion_envio` (5 a 255 caracteres) |
+
+El orden de los middleware queda: API key → rate limiter → JWT → rol → route model binding.
+
+### Pruebas con curl (falla vs. pasa)
+
+Reemplaza `TU_API_KEY`; `TOKEN1` (cliente1) y `ADMIN` se obtienen como en la etapa 4.
+
+```bash
+# PASA: registro; el "rol":"admin" del body se ignora  ->  201 con "rol":"cliente"
+curl -s -X POST http://127.0.0.1:8000/api/register \
+  -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
+  -d '{"name":"Ana López","email":"ana@correo.com","password":"secreta123","rol":"admin"}' | jq -c '.user | {email, rol}'
+
+# FALLA: el mismo email otra vez  ->  422 "Ya existe un registro con ese correo electrónico."
+curl -s -X POST http://127.0.0.1:8000/api/register \
+  -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
+  -d '{"name":"Ana","email":"ANA@correo.com","password":"secreta123"}' | jq
+
+# PASA: búsqueda y categoría  ->  2 productos
+curl -s -G http://127.0.0.1:8000/api/productos -H 'X-API-KEY: TU_API_KEY' \
+  --data-urlencode 'buscar=bluetooth' --data-urlencode 'categoria=Audio' | jq length
+
+# PASA: "Mis pedidos" de cliente1 solo trae los suyos  ->  [2,1]
+curl -s -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" http://127.0.0.1:8000/api/pedidos | jq -c '[.[].id]'
+
+# FALLA: un cliente pide la lista de usuarios  ->  403
+curl -i -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" http://127.0.0.1:8000/api/usuarios
+
+# PASA: el admin cambia el estado de un pedido  ->  200
+curl -s -X PATCH http://127.0.0.1:8000/api/pedidos/2/estado \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"estado":"pagado"}' | jq -c '{id, estado}'
+
+# FALLA: un cliente intenta lo mismo (aunque el pedido no exista)  ->  403
+curl -i -X PATCH http://127.0.0.1:8000/api/pedidos/99999/estado \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
+  -d '{"estado":"pagado"}'
+
+# FALLA: borrar un producto que ya está en pedidos  ->  409
+curl -i -X DELETE http://127.0.0.1:8000/api/productos/6 -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $ADMIN"
+```
+
+### Cómo demostrarlo en vivo
+
+1. Abre la tienda: solo se ve el inicio de sesión. Pulsa "Regístrate aquí", crea una cuenta y entra al catálogo.
+2. Busca "bluetooth", filtra por categoría y agrega productos al carrito. Confirma el pedido con una dirección: aparece
+   en "Mis pedidos" como Pendiente.
+3. Cierra sesión y entra como `admin`: **Administración** → Productos (crea, edita y elimina uno), Pedidos de clientes
+   (cambia el estado; al cancelar, el stock regresa) y Usuarios.
+4. Seguridad: en Postman, carpeta "5 · Tienda", muestra que un cliente recibe `403` en `/api/usuarios` y que el
+   registro ignora `"rol":"admin"`.
+5. XSS: crea un producto con nombre `<img src=x onerror=alert(1)>`: en el catálogo se ve como texto, no se ejecuta.

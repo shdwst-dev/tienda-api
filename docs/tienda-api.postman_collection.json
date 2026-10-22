@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6f1d2c9e-3b6a-4d7e-9a52-7c1e4b0a8f31",
     "name": "Tienda API",
-    "description": "Mini tienda de aparatos electrónicos (Laravel 13 + PostgreSQL). Un folder por concepto de seguridad.\n\n**Antes de empezar**\n1. En las variables de la colección pon `base_url` (sin `/` al final; por ejemplo `http://127.0.0.1:8000` o la URL de Cloudflare Tunnel) y `api_key` (el valor de `API_KEY` del `.env` del servidor).\n2. `token` se llena sola al hacer login (los requests de Login guardan el JWT en esta variable); `user_id` también.\n3. Corre la colección en orden (Runner): cada request lleva tests con el código esperado (401, 403, 429...).\n4. Los requests del folder 4 son para repetirlos (Runner con N iteraciones o Send varias veces).\n5. Para empezar de cero: `php artisan migrate:fresh --seed`; para reiniciar solo los contadores del rate limiter: `php artisan cache:clear`.\n\nUsuarios de prueba (contraseña `password`): `admin@tienda.com`, `cliente1@tienda.com` (pedidos 1 y 2), `cliente2@tienda.com` (pedidos 3 y 4).",
+    "description": "Mini tienda de aparatos electrónicos (Laravel 13 + PostgreSQL). Un folder por concepto de seguridad.\n\n**Antes de empezar**\n1. En las variables de la colección pon `base_url` (sin `/` al final; por ejemplo `http://127.0.0.1:8000` o la URL de Cloudflare Tunnel) y `api_key` (el valor de `API_KEY` del `.env` del servidor; el que viene es solo un ejemplo).\n2. `token`, `user_id` y `producto_id` se llenan solas (Login/Registro guardan el JWT; \"Crear producto\" guarda el id).\n3. Corre la colección en orden (Runner): cada request lleva tests con el código esperado (401, 403, 429...).\n4. Los requests del folder 4 son para repetirlos (Runner con N iteraciones o Send varias veces).\n5. Para empezar de cero: `php artisan migrate:fresh --seed`; para reiniciar solo los contadores del rate limiter: `php artisan cache:clear`.\n\nUsuarios de prueba (contraseña `password`): `admin@tienda.com`, `cliente1@tienda.com` (pedidos 1 y 2), `cliente2@tienda.com` (pedidos 3 y 4).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -13,7 +13,7 @@
     },
     {
       "key": "api_key",
-      "value": "",
+      "value": "cambia-esta-api-key",
       "type": "string"
     },
     {
@@ -23,6 +23,11 @@
     },
     {
       "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "producto_id",
       "value": "",
       "type": "string"
     }
@@ -697,7 +702,7 @@
             "description": "Manda `user_id: 3` (cliente2) en el body. Esperado: **201** y el pedido queda a nombre del dueño del token.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"user_id\": 3,\n  \"items\": [\n    {\n      \"producto_id\": 6,\n      \"cantidad\": 1\n    }\n  ]\n}",
+              "raw": "{\n  \"user_id\": 3,\n  \"direccion_envio\": \"Av. Universidad 123, Querétaro\",\n  \"items\": [\n    {\n      \"producto_id\": 6,\n      \"cantidad\": 1\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -757,7 +762,7 @@
             "description": "Un cliente intenta crear un producto. Esperado: **403** `No tienes permiso para esta acción.`",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
+              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"categoria\": \"Periféricos\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -927,7 +932,7 @@
             "description": "El admin crea un producto. Esperado: **201**.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
+              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"categoria\": \"Periféricos\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1049,7 +1054,7 @@
             "description": "Límite `pedidos`: **3 por minuto** por usuario (el del token; usa el token que haya guardado el último login). Los primeros 3 dan **201**, el cuarto **429**. Otro usuario, aunque llegue desde la misma IP, tiene su propia cuota.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"items\": [\n    {\n      \"producto_id\": 6,\n      \"cantidad\": 1\n    }\n  ]\n}",
+              "raw": "{\n  \"direccion_envio\": \"Av. Universidad 123, Querétaro\",\n  \"items\": [\n    {\n      \"producto_id\": 6,\n      \"cantidad\": 1\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1119,6 +1124,688 @@
                   "        pm.expect(pm.response.json().retry_after).to.be.a(\"number\");",
                   "    });",
                   "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 · Tienda (interfaz web)",
+      "description": "Los endpoints que usa la tienda TechStore: registro, búsqueda, mis pedidos y panel de administración.",
+      "item": [
+        {
+          "name": "Registro (guarda {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "register"
+              ]
+            },
+            "description": "Crea una cuenta de cliente (el rol nunca se toma del body, aunque se mande) y deja la sesión iniciada. Esperado: **201**.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cliente Prueba\",\n  \"email\": \"cliente{{$timestamp}}@correo.com\",\n  \"password\": \"secreta123\",\n  \"rol\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Cuenta creada (201) y siempre con rol cliente\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(pm.response.json().user.rol).to.eql(\"cliente\");",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"token\", pm.response.json().token);",
+                  "    pm.collectionVariables.set(\"user_id\", pm.response.json().user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis pedidos · cuenta nueva (200, vacío)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos"
+              ]
+            },
+            "description": "Un cliente solo recibe sus pedidos. La cuenta recién creada no tiene ninguno. Esperado: **200** con `[]`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Lista vacía\", function () {",
+                  "    pm.expect(pm.response.json()).to.have.lengthOf(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Catálogo · búsqueda y categoría (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos?buscar=bluetooth&categoria=Audio",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos?buscar=bluetooth&categoria=Audio"
+              ]
+            },
+            "description": "Filtros `buscar` (nombre o descripción) y `categoria`. Esperado: **200** con 2 productos."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"2 productos de Audio\", function () {",
+                  "    pm.expect(pm.response.json()).to.have.lengthOf(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Usuarios · cliente (403)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios"
+              ]
+            },
+            "description": "Solo el admin puede listar usuarios. Esperado: **403**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: No tienes permiso\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"No tienes permiso\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login admin (guarda {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Entra como admin.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@tienda.com\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login correcto (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "",
+                  "    pm.test(\"Trae un JWT de 3 partes y expires_in\", function () {",
+                  "        pm.expect(json.token).to.be.a(\"string\");",
+                  "        pm.expect(json.token.split(\".\")).to.have.lengthOf(3);",
+                  "        pm.expect(json.token_type).to.eql(\"Bearer\");",
+                  "        pm.expect(json.expires_in).to.be.a(\"number\");",
+                  "    });",
+                  "",
+                  "    pm.collectionVariables.set(\"token\", json.token);",
+                  "    pm.collectionVariables.set(\"user_id\", json.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Usuarios · admin (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios"
+              ]
+            },
+            "description": "Lista de usuarios sin contraseñas. Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Trae al menos 3 usuarios sin contraseña\", function () {",
+                  "    const lista = pm.response.json();",
+                  "    pm.expect(lista.length).to.be.above(2);",
+                  "    pm.expect(Object.keys(lista[0])).to.not.include(\"password\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Todos los pedidos · admin (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos"
+              ]
+            },
+            "description": "El admin recibe los pedidos de todos, con el cliente. Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Trae pedidos de varios clientes\", function () {",
+                  "    pm.expect(pm.response.json().length).to.be.above(3);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto · guarda {{producto_id}} (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "El admin crea un producto y se guarda su id. Esperado: **201**.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"categoria\": \"Periféricos\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.collectionVariables.set(\"producto_id\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Editar producto · admin (200)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos/{{producto_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos",
+                "{{producto_id}}"
+              ]
+            },
+            "description": "Cambia precio y stock del producto recién creado. Esperado: **200**.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"categoria\": \"Periféricos\",\n  \"precio\": 799.5,\n  \"stock\": 7\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar producto · con pedidos (409)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos/6",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos",
+                "6"
+              ]
+            },
+            "description": "El mouse ya aparece en pedidos: no se puede borrar. Esperado: **409**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 409\", function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: ya aparece en pedidos\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"ya aparece en pedidos\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar producto · admin (200)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos/{{producto_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos",
+                "{{producto_id}}"
+              ]
+            },
+            "description": "Borra el producto recién creado. Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado del pedido 2 · admin (200)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos/2/estado",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos",
+                "2",
+                "estado"
+              ]
+            },
+            "description": "Cambia el estado (pendiente, pagado, enviado o cancelado). Esperado: **200**.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"pagado\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado de un pedido · estado inválido (422)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos/2/estado",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos",
+                "2",
+                "estado"
+              ]
+            },
+            "description": "Esperado: **422** en español.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"volando\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 422\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});"
                 ]
               }
             }
