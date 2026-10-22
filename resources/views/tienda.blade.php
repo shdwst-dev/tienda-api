@@ -1,462 +1,266 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Tienda de electrónicos</title>
-    <style>
-        :root {
-            --fondo: #f3f5f8;
-            --tarjeta: #ffffff;
-            --texto: #1b2533;
-            --suave: #5d6b7c;
-            --borde: #dbe1e8;
-            --acento: #2457d6;
-            --ok: #12724f;
-            --error: #b42318;
-        }
-        * { box-sizing: border-box; }
-        body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fondo); color: var(--texto); }
-        header { background: #14213d; color: #fff; padding: 14px 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
-        header h1 { margin: 0; font-size: 20px; }
-        .etiqueta { background: #ffffff22; border: 1px solid #ffffff55; border-radius: 999px; padding: 2px 12px; font-size: 13px; }
-        main { max-width: 1100px; margin: 20px auto; padding: 0 16px 32px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); }
-        .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px; padding: 16px; }
-        .ancho { grid-column: 1 / -1; }
-        h2 { margin: 0 0 10px; font-size: 17px; }
-        label { display: block; font-size: 13px; color: var(--suave); margin-bottom: 8px; }
-        textarea { resize: vertical; font: 12px/1.4 ui-monospace, monospace; word-break: break-all; }
-        input, textarea, select { width: 100%; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 6px; font: inherit; color: var(--texto); background: #fff; }
-        button { padding: 7px 14px; border: 0; border-radius: 6px; background: var(--acento); color: #fff; font: inherit; cursor: pointer; }
-        button.secundario { background: #e8edf5; color: var(--texto); }
-        button:disabled { opacity: .5; cursor: not-allowed; }
-        .fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-        .suave { color: var(--suave); font-size: 13px; margin: 8px 0 0; }
-        .scroll { overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-        th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); }
-        td small { display: block; color: var(--suave); }
-        td input { width: 80px; }
-        code { background: #eef1f6; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
-        #aviso { position: sticky; top: 0; z-index: 10; padding: 10px 20px; background: #fff4e5; border-bottom: 2px solid #b54708; color: #7a2e0e; font-weight: 600; }
-        #estado { font-weight: 600; margin-bottom: 4px; }
-        #cabeceras { margin: 0 0 8px; font-size: 13px; color: var(--suave); }
-        #estado.ok { color: var(--ok); }
-        #estado.error { color: var(--error); }
-        pre { margin: 0; padding: 12px; background: #0f1724; color: #d7e3f4; border-radius: 8px; overflow: auto; max-height: 360px; font-size: 13px; }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{-- La API exige la API key en cada petición; el navegador la manda sola desde aquí (ver app.js). --}}
+    <meta name="api-key" content="{{ config('services.api_key') }}">
+    <title>TechStore - Tienda en Línea</title>
+    <link rel="stylesheet" href="/assets/styles.css?v={{ filemtime(public_path('assets/styles.css')) }}">
 </head>
 <body>
-<div id="aviso" role="alert" hidden></div>
-<header>
-    <h1>Tienda de electrónicos</h1>
-    <span class="etiqueta">v5-rate-limiter · + rate limiter</span>
-</header>
 
-<main>
-    <section class="tarjeta ancho">
-        <h2>API key</h2>
-        <label>Valor de <code>API_KEY</code> del servidor (se manda en el header <code>X-API-KEY</code> en cada petición)
-            <input id="api-key" autocomplete="off" spellcheck="false" placeholder="Pega aquí la API key">
-        </label>
-        <p class="suave" style="margin-top: 0;">No viene incrustada en la página a propósito: cualquiera que abra el sitio la vería.</p>
-    </section>
+<!-- Barra de navegación (oculta hasta que el usuario inicie sesión) -->
+<nav id="main-navbar" class="navbar" style="display: none;">
+    <div class="navbar-container">
+        <a class="brand" onclick="showView('catalog')">TechStore</a>
 
-    <section class="tarjeta">
-        <h2>Sesión</h2>
-        <form id="form-login">
-            <label>Email
-                <input id="email" type="email" value="cliente1@tienda.com" required>
-            </label>
-            <label>Contraseña
-                <input id="password" type="password" value="password" required>
-            </label>
-            <div class="fila">
-                <button type="submit">Entrar</button>
-                <button type="button" class="secundario" data-usuario="admin@tienda.com">admin</button>
-                <button type="button" class="secundario" data-usuario="cliente1@tienda.com">cliente1</button>
-                <button type="button" class="secundario" data-usuario="cliente2@tienda.com">cliente2</button>
+        <div class="nav-links">
+            <button id="nav-catalog" class="nav-link active" onclick="showView('catalog')">Catálogo</button>
+            <button id="nav-cart" class="nav-link" onclick="showView('cart')">Carrito (<span id="cart-count">0</span>)</button>
+            <button id="nav-orders" class="nav-link" onclick="showView('orders')">Mis pedidos</button>
+            <button id="nav-admin" class="nav-link" style="display: none;" onclick="showView('admin')">Administración</button>
+
+            <div class="user-menu">
+                <span id="current-user-name" class="user-name"></span>
+                <button class="btn btn-secondary btn-sm" onclick="logout()">Cerrar sesión</button>
             </div>
-        </form>
-        <div class="fila" style="margin-top: 8px;">
-            <button type="button" class="secundario" id="btn-logout" disabled>Cerrar sesión</button>
         </div>
-        <p class="suave" id="sesion-info">Sin sesión.</p>
-    </section>
+    </div>
+</nav>
 
-    <section class="tarjeta">
-        <h2>Perfil</h2>
-        <p class="suave" style="margin-top: 0;">Es el del dueño del token: ya no se manda ningún <code>user_id</code>.</p>
-        <button type="button" id="btn-perfil">Ver mi perfil</button>
-    </section>
+<main class="container">
+    <div id="global-alert" class="alert" role="alert"></div>
 
-    <section class="tarjeta ancho" id="tarjeta-token" hidden>
-        <h2>Token JWT</h2>
-        <label>Se manda en cada petición como <code>Authorization: Bearer &lt;token&gt;</code> (se guarda en <code>sessionStorage</code>)
-            <textarea id="token-texto" rows="3" readonly></textarea>
-        </label>
-        <p class="suave" style="margin-top: 0;">Claims (decodificados aquí solo para mostrarlos; la firma la verifica el servidor):</p>
-        <pre id="token-claims"></pre>
-    </section>
-
-    <section class="tarjeta ancho">
-        <div class="fila" style="justify-content: space-between; margin-bottom: 8px;">
-            <h2 style="margin: 0;">Productos</h2>
-            <button type="button" class="secundario" id="btn-productos">Recargar</button>
-        </div>
-        <div class="scroll">
-            <table id="tabla-productos">
-                <thead>
-                <tr><th>ID</th><th>Producto</th><th>Precio</th><th>Stock</th><th>Cantidad</th></tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </section>
-
-    <section class="tarjeta">
-        <h2>Crear pedido</h2>
-        <p class="suave" style="margin-top: 0;">Elige las cantidades en la tabla de productos. El pedido queda a nombre de quien tiene la sesión: el servidor ignora cualquier <code>user_id</code>.</p>
-        <button type="button" id="btn-pedido">Crear pedido</button>
-    </section>
-
-    <section class="tarjeta">
-        <h2>Ver pedido por id</h2>
-        <form id="form-ver-pedido">
-            <label>ID del pedido
-                <input id="ver-pedido-id" type="number" min="1" value="1" required>
-            </label>
-            <button type="submit">Consultar</button>
-        </form>
-        <p class="suave">Pedidos de ejemplo: cliente1 tiene el 1 y el 2; cliente2, el 3 y el 4. Un cliente solo puede ver los suyos; el admin ve todos.</p>
-    </section>
-
-    <section class="tarjeta ancho">
-        <h2>Crear producto (solo admin)</h2>
-        <form id="form-producto">
-            <div class="fila">
-                <label style="flex: 2 1 200px;">Nombre
-                    <input id="producto-nombre" required>
-                </label>
-                <label style="flex: 3 1 260px;">Descripción
-                    <input id="producto-descripcion">
-                </label>
-                <label style="flex: 1 1 110px;">Precio
-                    <input id="producto-precio" type="number" min="0" step="0.01" required>
-                </label>
-                <label style="flex: 1 1 90px;">Stock
-                    <input id="producto-stock" type="number" min="0" step="1" value="10" required>
-                </label>
+    <!-- VISTA: INICIAR SESIÓN (vista inicial por defecto) -->
+    <section id="view-login" class="view-section active">
+        <div class="auth-wrapper card">
+            <div class="auth-header">
+                <h1>TechStore</h1>
+                <p>Inicia sesión para acceder a la tienda</p>
             </div>
-            <button type="submit">Crear producto</button>
-        </form>
-    </section>
-
-    <section class="tarjeta ancho">
-        <h2>Probar el rate limiter</h2>
-        <div class="fila">
-            <label style="flex: 3 1 280px;">Petición que se repite
-                <select id="rafaga-tipo">
-                    <option value="productos">GET /api/productos (límite api: 60 por minuto)</option>
-                    <option value="perfil">GET /api/perfil (límite api: 60 por minuto)</option>
-                    <option value="login">POST /api/login con contraseña incorrecta (límite login: 5 por minuto)</option>
-                </select>
-            </label>
-            <label style="flex: 1 1 100px;">Cuántas veces
-                <input id="rafaga-n" type="number" min="1" max="200" value="65">
-            </label>
+            <form onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="login-email">Correo electrónico</label>
+                    <input id="login-email" type="email" class="form-control" autocomplete="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Contraseña</label>
+                    <input id="login-password" type="password" class="form-control" autocomplete="current-password" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Iniciar sesión</button>
+            </form>
+            <p class="auth-switch">
+                ¿No tienes cuenta? <a href="#" onclick="showView('register'); return false;">Regístrate aquí</a>
+            </p>
         </div>
-        <button type="button" id="btn-rafaga">Disparar ráfaga</button>
-        <p class="suave">Con sesión el límite se cuenta por usuario; sin sesión, por API key. El login de la ráfaga usa un email falso para no bloquear a los usuarios de prueba. Para <code>POST /api/pedidos</code> (3 por minuto) basta con darle varias veces a "Crear pedido".</p>
     </section>
 
-    <section class="tarjeta ancho">
-        <h2>Última respuesta de la API</h2>
-        <div id="estado">Todavía no hay peticiones.</div>
-        <div id="cabeceras"></div>
-        <pre id="salida">{}</pre>
+    <!-- VISTA: REGISTRO -->
+    <section id="view-register" class="view-section">
+        <div class="auth-wrapper card">
+            <div class="auth-header">
+                <h1>TechStore</h1>
+                <p>Crea una cuenta para continuar</p>
+            </div>
+            <form onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label for="reg-name">Nombre completo</label>
+                    <input id="reg-name" type="text" class="form-control" autocomplete="name" maxlength="255" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-email">Correo electrónico</label>
+                    <input id="reg-email" type="email" class="form-control" autocomplete="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Contraseña</label>
+                    <input id="reg-password" type="password" class="form-control" autocomplete="new-password" minlength="8" maxlength="72" required>
+                    <small class="field-hint">Mínimo 8 caracteres.</small>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Crear cuenta</button>
+            </form>
+            <p class="auth-switch">
+                ¿Ya tienes cuenta? <a href="#" onclick="showView('login'); return false;">Inicia sesión</a>
+            </p>
+        </div>
+    </section>
+
+    <!-- VISTA: CATÁLOGO -->
+    <section id="view-catalog" class="view-section">
+        <div class="page-header">
+            <h1 class="page-title">Catálogo de Productos</h1>
+        </div>
+
+        <form class="filters-bar" onsubmit="event.preventDefault(); loadCatalog();">
+            <input id="search-input" type="text" class="form-control" maxlength="100" placeholder="Buscar por nombre o descripción...">
+            <select id="category-select" class="form-select">
+                <option value="">Todas las categorías</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Buscar</button>
+            <button type="button" class="btn btn-secondary" onclick="resetFilters()">Limpiar</button>
+        </form>
+
+        <div id="products-grid" class="products-grid"></div>
+    </section>
+
+    <!-- VISTA: CARRITO -->
+    <section id="view-cart" class="view-section">
+        <div class="page-header">
+            <h1 class="page-title">Carrito de Compras</h1>
+        </div>
+
+        <div class="card">
+            <div id="cart-empty" class="muted">No hay productos en tu carrito.</div>
+
+            <div id="cart-content" style="display: none;">
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Producto</th>
+                            <th>Precio unitario</th>
+                            <th>Cantidad</th>
+                            <th>Subtotal</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody id="cart-tbody"></tbody>
+                    </table>
+                </div>
+
+                <div class="cart-footer">
+                    <div class="cart-address">
+                        <label for="shipping-address">Dirección de envío</label>
+                        <input id="shipping-address" type="text" class="form-control" maxlength="255" autocomplete="street-address" placeholder="Calle, número, colonia y ciudad">
+                    </div>
+                    <div class="cart-summary">
+                        <div class="cart-total">
+                            Total: <span id="cart-total">$0.00</span>
+                        </div>
+                        <button class="btn btn-secondary" onclick="clearCart()">Vaciar carrito</button>
+                        <button id="checkout-btn" class="btn btn-primary" onclick="checkout()">Confirmar pedido</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- VISTA: MIS PEDIDOS -->
+    <section id="view-orders" class="view-section">
+        <div class="page-header">
+            <h1 class="page-title">Mis Pedidos</h1>
+        </div>
+        <div id="orders-container"></div>
+    </section>
+
+    <!-- VISTA: ADMINISTRACIÓN (solo visible para administradores) -->
+    <section id="view-admin" class="view-section">
+        <div class="page-header">
+            <h1 class="page-title">Panel de Administración</h1>
+        </div>
+
+        <div class="sub-nav">
+            <button id="admin-tab-products" class="nav-link active" onclick="showAdminSection('products')">Productos</button>
+            <button id="admin-tab-orders" class="nav-link" onclick="showAdminSection('orders')">Pedidos de clientes</button>
+            <button id="admin-tab-users" class="nav-link" onclick="showAdminSection('users')">Usuarios</button>
+        </div>
+
+        <!-- Admin: Productos -->
+        <div id="admin-sec-products">
+            <div class="card">
+                <h3 id="product-form-title" class="card-title">Agregar producto</h3>
+                <form onsubmit="saveProduct(event)" class="product-form">
+                    <input id="prod-id" type="hidden">
+                    <div>
+                        <label for="prod-name">Nombre</label>
+                        <input id="prod-name" type="text" class="form-control" maxlength="255" required>
+                    </div>
+                    <div>
+                        <label for="prod-category">Categoría</label>
+                        <input id="prod-category" type="text" class="form-control" list="category-options" maxlength="100" required>
+                        <datalist id="category-options"></datalist>
+                    </div>
+                    <div>
+                        <label for="prod-price">Precio ($)</label>
+                        <input id="prod-price" type="number" step="0.01" min="0.01" class="form-control" required>
+                    </div>
+                    <div>
+                        <label for="prod-stock">Stock</label>
+                        <input id="prod-stock" type="number" min="0" step="1" class="form-control" required>
+                    </div>
+                    <div class="full-row">
+                        <label for="prod-description">Descripción</label>
+                        <input id="prod-description" type="text" class="form-control" maxlength="2000" required>
+                    </div>
+                    <div class="full-row form-actions">
+                        <button type="submit" class="btn btn-primary">Guardar producto</button>
+                        <button type="button" id="prod-cancel-btn" class="btn btn-secondary" style="display: none;" onclick="resetProductForm()">Cancelar edición</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Nombre</th>
+                            <th>Categoría</th>
+                            <th>Precio</th>
+                            <th>Stock</th>
+                            <th>Acciones</th>
+                        </tr>
+                        </thead>
+                        <tbody id="admin-products-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin: todos los pedidos -->
+        <div id="admin-sec-orders" style="display: none;">
+            <div class="card">
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Folio</th>
+                            <th>Cliente</th>
+                            <th>Dirección</th>
+                            <th>Artículos</th>
+                            <th>Total</th>
+                            <th>Estado</th>
+                        </tr>
+                        </thead>
+                        <tbody id="admin-orders-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin: usuarios -->
+        <div id="admin-sec-users" style="display: none;">
+            <div class="card">
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Nombre</th>
+                            <th>Correo electrónico</th>
+                            <th>Rol</th>
+                            <th>Fecha de registro</th>
+                        </tr>
+                        </thead>
+                        <tbody id="admin-users-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </section>
 </main>
 
-<script>
-    const API = '/api';
-    const $ = (id) => document.getElementById(id);
-    const dinero = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
-
-    // El almacenamiento del navegador puede estar bloqueado: nunca debe romper la página.
-    function leer(tipo, clave) {
-        try { return window[tipo].getItem(clave); } catch (e) { return null; }
-    }
-
-    function guardar(tipo, clave, valor) {
-        try { window[tipo].setItem(clave, valor); } catch (e) { /* se queda solo en memoria */ }
-    }
-
-    function leerJson(tipo, clave) {
-        try { return JSON.parse(leer(tipo, clave)); } catch (e) { return null; }
-    }
-
-    function borrar(tipo, clave) {
-        try { window[tipo].removeItem(clave); } catch (e) { /* nada que borrar */ }
-    }
-
-    let usuario = leerJson('sessionStorage', 'usuario');
-    let token = leer('sessionStorage', 'token');
-    let apiKey = leer('localStorage', 'apiKey') ?? '';
-
-    function cabeceras(conCuerpo) {
-        const h = { 'Accept': 'application/json' };
-        if (conCuerpo) h['Content-Type'] = 'application/json';
-        if (apiKey) h['X-API-KEY'] = apiKey;
-        if (token) h['Authorization'] = `Bearer ${token}`;
-        return h;
-    }
-
-    function mostrar(texto, ok, datos, cabecerasTexto = '') {
-        $('estado').textContent = texto;
-        $('estado').className = ok ? 'ok' : 'error';
-        $('cabeceras').textContent = cabecerasTexto;
-        $('salida').textContent = datos === undefined ? '' : JSON.stringify(datos, null, 2);
-    }
-
-    // 429: muestra el mensaje de la API en un aviso fijo con cuenta regresiva (Retry-After).
-    let temporizador = null;
-
-    function avisarLimite(mensaje, segundos) {
-        clearInterval(temporizador);
-        let restantes = segundos > 0 ? segundos : 5;
-        const pintar = () => { $('aviso').textContent = `${mensaje} (se desbloquea en ${restantes} s)`; };
-
-        $('aviso').hidden = false;
-        pintar();
-        temporizador = setInterval(() => {
-            restantes -= 1;
-            if (restantes <= 0) {
-                clearInterval(temporizador);
-                $('aviso').hidden = true;
-                return;
-            }
-            pintar();
-        }, 1000);
-    }
-
-    // silencioso: no pisa el panel "Última respuesta" (se usa al recargar la tabla de productos)
-    async function api(metodo, ruta, cuerpo, silencioso = false) {
-        const opciones = { method: metodo, headers: cabeceras(cuerpo !== undefined) };
-        if (cuerpo !== undefined) opciones.body = JSON.stringify(cuerpo);
-
-        try {
-            const res = await fetch(API + ruta, opciones);
-            const datos = await res.json().catch(() => null);
-            const limites = ['Retry-After', 'X-RateLimit-Limit', 'X-RateLimit-Remaining']
-                .filter((h) => res.headers.has(h))
-                .map((h) => `${h}: ${res.headers.get(h)}`)
-                .join(' · ');
-            const reintentar = Number(res.headers.get('Retry-After')) || 0;
-
-            if (res.status === 429) avisarLimite(datos?.message ?? 'Demasiadas peticiones.', reintentar);
-            if (!silencioso) mostrar(`${metodo} ${API}${ruta} → ${res.status}`, res.ok, datos, limites);
-            return { ok: res.ok, status: res.status, datos, reintentar };
-        } catch (e) {
-            mostrar(`${metodo} ${API}${ruta} → no se pudo conectar con la API`, false);
-            return { ok: false, status: 0, datos: null, reintentar: 0 };
-        }
-    }
-
-    // Solo para mostrar los claims: decodificar NO verifica nada, eso lo hace el servidor.
-    function claimsDe(jwt) {
-        try {
-            return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-        } catch (e) {
-            return null;
-        }
-    }
-
-    function pintarSesion() {
-        const activa = Boolean(usuario && token);
-        const claims = activa ? claimsDe(token) : null;
-
-        $('btn-logout').disabled = !activa;
-        $('tarjeta-token').hidden = !activa;
-
-        if (!activa) {
-            $('sesion-info').textContent = 'Sin sesión.';
-            return;
-        }
-
-        const expira = claims?.exp ? ` · el token expira a las ${new Date(claims.exp * 1000).toLocaleTimeString()}` : '';
-        $('sesion-info').textContent = `Sesión de ${usuario.name} (${usuario.email}) · id ${usuario.id} · rol ${usuario.rol}${expira}`;
-        $('token-texto').value = token;
-        $('token-claims').textContent = JSON.stringify(claims, null, 2);
-    }
-
-    function iniciarSesion(datos) {
-        usuario = datos.user;
-        token = datos.token;
-        guardar('sessionStorage', 'usuario', JSON.stringify(usuario));
-        guardar('sessionStorage', 'token', token);
-        pintarSesion();
-    }
-
-    function limpiarSesion() {
-        usuario = null;
-        token = null;
-        borrar('sessionStorage', 'usuario');
-        borrar('sessionStorage', 'token');
-        pintarSesion();
-    }
-
-    async function login(e) {
-        e.preventDefault();
-        const r = await api('POST', '/login', { email: $('email').value, password: $('password').value });
-        if (r.ok) iniciarSesion(r.datos);
-    }
-
-    async function logout() {
-        const r = await api('POST', '/logout');
-        // 200: el token quedó revocado. 401: ya no servía (expirado o revocado). En ambos casos se limpia.
-        if (r.ok || r.status === 401) limpiarSesion();
-    }
-
-    function celda(fila, texto) {
-        const td = document.createElement('td');
-        td.textContent = texto;
-        fila.appendChild(td);
-        return td;
-    }
-
-    function pintarProductos(productos) {
-        const cuerpo = $('tabla-productos').querySelector('tbody');
-        cuerpo.replaceChildren();
-
-        for (const p of productos) {
-            const fila = document.createElement('tr');
-            fila.dataset.id = p.id;
-
-            celda(fila, p.id);
-
-            const nombre = celda(fila, p.nombre);
-            const detalle = document.createElement('small');
-            detalle.textContent = p.descripcion ?? '';
-            nombre.appendChild(detalle);
-
-            celda(fila, dinero.format(p.precio));
-            celda(fila, p.stock);
-
-            const cantidad = document.createElement('input');
-            cantidad.type = 'number';
-            cantidad.min = '0';
-            cantidad.max = String(p.stock);
-            cantidad.value = '0';
-            celda(fila, '').appendChild(cantidad);
-
-            cuerpo.appendChild(fila);
-        }
-    }
-
-    async function cargarProductos(silencioso = false) {
-        const r = await api('GET', '/productos', undefined, silencioso);
-        if (r.ok) pintarProductos(r.datos);
-    }
-
-    async function crearPedido() {
-        const items = [...document.querySelectorAll('#tabla-productos tbody tr')]
-            .map((fila) => ({ producto_id: Number(fila.dataset.id), cantidad: Number(fila.querySelector('input').value) }))
-            .filter((item) => item.cantidad > 0);
-
-        if (items.length === 0) {
-            mostrar('Elige al menos un producto con cantidad mayor a 0.', false);
-            return;
-        }
-
-        const r = await api('POST', '/pedidos', { items });
-        if (r.ok) {
-            $('ver-pedido-id').value = r.datos.id;
-            cargarProductos(true);
-        }
-    }
-
-    function verPedido(e) {
-        e.preventDefault();
-        api('GET', `/pedidos/${encodeURIComponent($('ver-pedido-id').value)}`);
-    }
-
-    function verPerfil() {
-        api('GET', '/perfil');
-    }
-
-    async function crearProducto(e) {
-        e.preventDefault();
-        const r = await api('POST', '/productos', {
-            nombre: $('producto-nombre').value,
-            descripcion: $('producto-descripcion').value || null,
-            precio: Number($('producto-precio').value),
-            stock: Number($('producto-stock').value),
-        });
-        if (r.ok) {
-            $('form-producto').reset();
-            cargarProductos(true);
-        }
-    }
-
-    // Repite una petición N veces seguidas y resume los códigos de respuesta (200 ... 429).
-    async function rafaga() {
-        const tipo = $('rafaga-tipo').value;
-        const total = Math.min(200, Math.max(1, Number($('rafaga-n').value) || 1));
-        const conteo = {};
-        let primer429 = null;
-        let reintentar = 0;
-
-        $('btn-rafaga').disabled = true;
-
-        for (let i = 1; i <= total; i++) {
-            const r = tipo === 'login'
-                ? await api('POST', '/login', { email: 'atacante@tienda.com', password: 'incorrecta' }, true)
-                : await api('GET', tipo === 'perfil' ? '/perfil' : '/productos', undefined, true);
-
-            conteo[r.status] = (conteo[r.status] ?? 0) + 1;
-            if (r.status === 429 && primer429 === null) {
-                primer429 = i;
-                reintentar = r.reintentar;
-            }
-        }
-
-        $('btn-rafaga').disabled = false;
-
-        const resumen = Object.entries(conteo).map(([codigo, n]) => `${codigo} × ${n}`).join(' · ');
-        mostrar(`Ráfaga de ${total} peticiones → ${resumen}`, primer429 === null, {
-            codigos: conteo,
-            primer_429_en_la_peticion: primer429,
-            retry_after: reintentar,
-        });
-    }
-
-    $('api-key').value = apiKey;
-    $('api-key').addEventListener('input', (e) => {
-        apiKey = e.target.value.trim();
-        guardar('localStorage', 'apiKey', apiKey);
-    });
-    $('api-key').addEventListener('change', () => cargarProductos());
-
-    $('form-login').addEventListener('submit', login);
-    $('form-ver-pedido').addEventListener('submit', verPedido);
-    $('form-producto').addEventListener('submit', crearProducto);
-    $('btn-perfil').addEventListener('click', verPerfil);
-    $('btn-logout').addEventListener('click', logout);
-    $('btn-rafaga').addEventListener('click', rafaga);
-    $('btn-pedido').addEventListener('click', crearPedido);
-    $('btn-productos').addEventListener('click', () => cargarProductos());
-
-    document.querySelectorAll('[data-usuario]').forEach((boton) => {
-        boton.addEventListener('click', () => {
-            $('email').value = boton.dataset.usuario;
-            $('password').value = 'password';
-        });
-    });
-
-    pintarSesion();
-    cargarProductos();
-</script>
+<script src="/assets/app.js?v={{ filemtime(public_path('assets/app.js')) }}"></script>
 </body>
 </html>

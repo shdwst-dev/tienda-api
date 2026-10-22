@@ -7,9 +7,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'total', 'estado'])]
+#[Fillable(['user_id', 'total', 'estado', 'direccion_envio'])]
 class Pedido extends Model
 {
+    public const ESTADO_PENDIENTE = 'pendiente';
+
+    public const ESTADO_CANCELADO = 'cancelado';
+
+    public const ESTADOS = ['pendiente', 'pagado', 'enviado', 'cancelado'];
+
     /**
      * Get the attributes that should be cast.
      *
