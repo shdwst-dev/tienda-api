@@ -14,7 +14,7 @@ class ProductoController extends Controller
     }
 
     /**
-     * VULNERABLE (v1): cualquiera puede crear productos, no hay autenticación ni roles.
+     * Solo admin (la ruta lleva el middleware rol:admin).
      */
     public function store(Request $request): JsonResponse
     {

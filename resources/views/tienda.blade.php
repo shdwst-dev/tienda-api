@@ -48,7 +48,7 @@
 <body>
 <header>
     <h1>Tienda de electrónicos</h1>
-    <span class="etiqueta">v3-jwt · API key + JWT</span>
+    <span class="etiqueta">v4-bola-roles · BOLA + roles</span>
 </header>
 
 <main>
@@ -114,10 +114,7 @@
 
     <section class="tarjeta">
         <h2>Crear pedido</h2>
-        <p class="suave" style="margin-top: 0;">Elige las cantidades en la tabla de productos.</p>
-        <label>user_id (a nombre de quién se crea)
-            <input id="pedido-user-id" type="number" min="1" value="1">
-        </label>
+        <p class="suave" style="margin-top: 0;">Elige las cantidades en la tabla de productos. El pedido queda a nombre de quien tiene la sesión: el servidor ignora cualquier <code>user_id</code>.</p>
         <button type="button" id="btn-pedido">Crear pedido</button>
     </section>
 
@@ -129,10 +126,11 @@
             </label>
             <button type="submit">Consultar</button>
         </form>
+        <p class="suave">Pedidos de ejemplo: cliente1 tiene el 1 y el 2; cliente2, el 3 y el 4. Un cliente solo puede ver los suyos; el admin ve todos.</p>
     </section>
 
     <section class="tarjeta ancho">
-        <h2>Crear producto</h2>
+        <h2>Crear producto (solo admin)</h2>
         <form id="form-producto">
             <div class="fila">
                 <label style="flex: 2 1 200px;">Nombre
@@ -240,7 +238,6 @@
         $('sesion-info').textContent = `Sesión de ${usuario.name} (${usuario.email}) · id ${usuario.id} · rol ${usuario.rol}${expira}`;
         $('token-texto').value = token;
         $('token-claims').textContent = JSON.stringify(claims, null, 2);
-        $('pedido-user-id').value = usuario.id;
     }
 
     function iniciarSesion(datos) {
@@ -322,7 +319,7 @@
             return;
         }
 
-        const r = await api('POST', '/pedidos', { user_id: Number($('pedido-user-id').value), items });
+        const r = await api('POST', '/pedidos', { items });
         if (r.ok) {
             $('ver-pedido-id').value = r.datos.id;
             cargarProductos(true);
