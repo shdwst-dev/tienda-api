@@ -12,6 +12,7 @@ El proyecto se construye por etapas. Cada concepto de seguridad vive en su propi
 | `v2-api-key` | `01-api-key` | API key: header `X-API-KEY` obligatorio en toda la API |
 | `v3-jwt` | `02-jwt` | JWT: login con token firmado, expiración y revocación en el logout |
 | `v4-bola-roles` | `03-bola-roles` | BOLA/IDOR (`PedidoPolicy`), `user_id` tomado del token y roles (`rol:admin`) |
+| `v5-rate-limiter` | `04-rate-limiter` | Rate limiter por usuario/API key (nunca por IP) con respuesta `429` en JSON y `Retry-After` |
 
 ## Puesta en marcha
 
@@ -70,18 +71,58 @@ Además hay 8 productos electrónicos (ids 1 a 8). `migrate:fresh --seed` deja t
 
 ### Endpoints
 
-| Método | Ruta | Qué hace | Acceso |
-|--------|------|----------|--------|
-| POST | `/api/login` | Valida credenciales y regresa un JWT y el usuario | API key |
-| POST | `/api/logout` | Revoca el token que se usó en la petición | API key + JWT |
-| GET | `/api/perfil` | Datos del dueño del token | API key + JWT |
-| GET | `/api/productos` | Lista de productos | API key |
-| POST | `/api/productos` | Crea un producto | API key + JWT + rol `admin` |
-| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | API key + JWT (solo el dueño o un admin) |
-| POST | `/api/pedidos` | Crea un pedido (`items`) a nombre del dueño del token | API key + JWT |
+| Método | Ruta | Qué hace | Acceso | Límite |
+|--------|------|----------|--------|--------|
+| POST | `/api/login` | Valida credenciales y regresa un JWT y el usuario | API key | `login`: 5/min por email + API key |
+| POST | `/api/logout` | Revoca el token que se usó en la petición | API key + JWT | `api`: 60/min |
+| GET | `/api/perfil` | Datos del dueño del token | API key + JWT | `api`: 60/min |
+| GET | `/api/productos` | Lista de productos | API key | `api`: 60/min |
+| POST | `/api/productos` | Crea un producto | API key + JWT + rol `admin` | `api`: 60/min |
+| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | API key + JWT (solo el dueño o un admin) | `api`: 60/min |
+| POST | `/api/pedidos` | Crea un pedido (`items`) a nombre del dueño del token | API key + JWT | `pedidos`: 3/min por usuario |
+
+El límite `api` es por usuario del token (o por API key si no hay token válido). Ningún límite usa la IP.
 
 Las rutas de `routes/api.php` se registran a mano en `bootstrap/app.php` (no se usó `php artisan install:api`,
 así que no hay Sanctum ni Passport).
+
+### Despliegue en una VM Ubuntu con Cloudflare Tunnel
+
+```bash
+git clone <repo> tienda-api && cd tienda-api
+composer install --no-dev --optimize-autoloader
+cp .env.example .env
+php artisan key:generate
+# edita .env con los valores de abajo
+php artisan migrate:fresh --seed --force
+php artisan serve --host=127.0.0.1 --port=8000
+cloudflared tunnel --url http://localhost:8000      # en otra terminal; imprime la URL pública https://....trycloudflare.com
+```
+
+Variables del `.env` de la VM:
+
+```dotenv
+APP_ENV=production
+APP_DEBUG=false                 # con true los errores 500 muestran trace y rutas del servidor
+APP_KEY=                        # lo llena php artisan key:generate
+APP_URL=http://localhost:8000
+
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=tienda_api
+DB_USERNAME=tu_usuario
+DB_PASSWORD=tu_password
+
+CACHE_STORE=database            # contadores del rate limiter y lista negra de JWT
+
+API_KEY=                        # openssl rand -hex 24
+JWT_SECRET=                     # openssl rand -hex 32 (mínimo 32 caracteres)
+JWT_TTL=30                      # minutos de vida del token
+```
+
+Con el túnel, todas las peticiones llegan a Laravel desde `127.0.0.1`: por eso el rate limiter usa el usuario o la
+API key y nunca la IP. Para dar acceso a quien revise la API desde Postman, pásale la URL del túnel y la `API_KEY`.
 
 ---
 
@@ -261,8 +302,8 @@ de otra persona, y cualquier usuario con token puede crear productos. Saber *qui
 Detalles que conviene mencionar:
 
 - `firebase/php-jwt` acepta tokens sin `exp`; el middleware los rechaza porque `exp` es obligatorio.
-- El middleware implementa `AuthenticatesRequests`, así Laravel lo ejecuta antes del rate limiter y del route model
-  binding: sin token, pedir un pedido que no existe responde `401`, no `404`.
+- El middleware se ejecuta antes del route model binding: sin token, pedir un pedido que no existe responde `401`,
+  no `404` (así no se puede "tantear" qué pedidos existen).
 - `php artisan cache:clear` (y `migrate:fresh`) vacía también la lista negra: los tokens revocados vuelven a valer
   hasta su `exp`.
 
@@ -441,3 +482,144 @@ curl -s -X POST http://127.0.0.1:8000/api/pedidos \
 6. Extra: el rol sale de la base de datos. Con un token de admin vigente, ejecuta
    `update users set rol = 'cliente' where email = 'admin@tienda.com';` y repite `POST /api/productos`: ahora da
    `403`. Para dejarlo como estaba: `update users set rol = 'admin' where email = 'admin@tienda.com';`.
+
+---
+
+## Etapa 5 — Rate limiter (`v5-rate-limiter`, rama `04-rate-limiter`)
+
+### Qué ataque previene
+
+- **Fuerza bruta y credential stuffing** contra `POST /api/login`: sin límite, un script prueba miles de contraseñas
+  por minuto. Con el límite solo tiene 5 intentos por minuto por cuenta.
+- **Abuso de recursos, scraping y DoS a nivel de aplicación** (*Unrestricted Resource Consumption*, API4 del OWASP API
+  Security Top 10): 60 peticiones por minuto por usuario.
+- **Spam de operaciones costosas**: cada pedido toca inventario y base de datos, así que solo se permiten 3 por minuto
+  por usuario.
+- Un cliente que se descontrola no afecta a los demás: cada usuario tiene su propio contador.
+
+### Por qué la llave NO es la IP
+
+La API se expone con Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:8000`), así que **todas las
+peticiones llegan a Laravel desde `127.0.0.1`**. Un límite por IP metería a todos los usuarios en el mismo contador y
+uno solo bloquearía a los demás. Por eso las llaves son:
+
+| Limitador | Límite | Llave | Dónde se aplica |
+|-----------|--------|-------|-----------------|
+| `login` | 5 por minuto | email + API key | `POST /api/login` |
+| `api` | 60 por minuto | usuario del token; si no hay token válido, la API key | todas las demás rutas |
+| `pedidos` | 3 por minuto | usuario del token | `POST /api/pedidos` |
+
+Cada ruta usa **un solo** limitador: `login` y `pedidos` sustituyen al general con `withoutMiddleware('throttle:api')`.
+
+### Cómo funciona
+
+1. Los tres limitadores se definen con `RateLimiter::for(...)` en `AppServiceProvider::boot()`. Cada uno regresa
+   `Limit::perMinute(N)->by(llave)`. El general se aplica a toda la API con `$middleware->throttleApi()`.
+2. Al pasarse del límite responde `429` en **JSON** con el header `Retry-After` (`->response(...)` de `Limit`):
+
+   ```http
+   HTTP/1.1 429 Too Many Requests
+   Retry-After: 41
+   X-RateLimit-Limit: 5
+   X-RateLimit-Remaining: 0
+
+   {"message":"Demasiados intentos de inicio de sesión. Intenta de nuevo en 41 segundos.","retry_after":41}
+   ```
+
+   Las respuestas normales también traen `X-RateLimit-Limit` y `X-RateLimit-Remaining`.
+3. "Usuario del token" sale de decodificar el JWT **verificando firma y vigencia** (`JwtService::usuarioDeToken`). Un
+   token falso no sirve para gastar la cuota de otra persona; cae en el contador de la API key.
+4. Orden de los middleware (`bootstrap/app.php`): **API key → rate limiter → JWT → route model binding → rol**.
+   - La API key va primero: una llave falsa se rechaza sin crear contadores en la caché.
+   - El límite va antes del JWT: también cuentan las peticiones sin token o con token malo (por API key), no solo las
+     autenticadas. Por eso `GET /api/perfil` sin token da `401` y, pasadas 60, `429`.
+5. Los contadores viven en la caché (`CACHE_STORE=database`, tabla `cache`). `php artisan cache:clear` los reinicia
+   (también vacía la lista negra de JWT).
+
+### Limitaciones que conviene conocer
+
+- Todo el tráfico **anónimo** comparte un solo contador (la API key): un cliente anónimo ruidoso puede dejar sin
+  respuesta a los demás anónimos hasta por un minuto. Quien manda un token válido no se ve afectado.
+- El límite de login es **por cuenta**: quien prueba muchos emails distintos tiene 5 intentos por cada uno.
+- El rate limiter de Laravel revisa y luego cuenta: con peticiones simultáneas pueden colarse unas pocas de más
+  (en una prueba con 100 peticiones en paralelo y límite 60 pasaron 62).
+- Para limitar por la IP real detrás de Cloudflare habría que confiar en `CF-Connecting-IP` (con `TrustProxies`).
+  No se hace porque el requisito es no usar la IP.
+
+### Archivos que se tocaron
+
+- `app/Providers/AppServiceProvider.php`: los tres limitadores y la respuesta `429` en JSON.
+- `routes/api.php`: `throttle:login`, `throttle:pedidos` y `withoutMiddleware('throttle:api')` en esas dos rutas.
+- `bootstrap/app.php`: `throttleApi()` y el orden de los middleware (`appendToPriorityList`).
+- `app/Services/JwtService.php`: `usuarioDeToken()`, la llave por usuario del limitador.
+- `app/Http/Middleware/AuthenticateJwt.php`: ya no implementa `AuthenticatesRequests`; el orden se declara en `bootstrap/app.php`.
+- `resources/views/tienda.blade.php`: aviso con el mensaje del `429` y cuenta regresiva, headers de límite en el panel de
+  respuesta y la tarjeta "Probar el rate limiter".
+- `docs/tienda-api.postman_collection.json` (nuevo): colección de Postman.
+
+### Pruebas con curl (falla vs. pasa)
+
+Reemplaza `TU_API_KEY` por tu `API_KEY`. Primero guarda `TOKEN1` y `TOKEN2` como en la etapa 4 y **después** reinicia
+los contadores con `php artisan cache:clear`, para que esos logins de preparación no cuenten. El `?[1-6]` es un rango
+de `curl` que repite la petición 6 veces (sirve igual en bash, zsh y fish).
+
+```bash
+# FALLA: 6 logins seguidos con contraseña incorrecta  ->  401 x5 y 429 x1
+curl -s -o /dev/null -w '%{http_code}\n' -X POST 'http://127.0.0.1:8000/api/login?[1-6]' \
+  -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
+  -d '{"email":"cliente1@tienda.com","password":"incorrecta"}'
+
+# FALLA: aunque ahora la contraseña sea correcta, cliente1 sigue bloqueado un minuto  ->  429 con Retry-After
+curl -i -X POST http://127.0.0.1:8000/api/login \
+  -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
+  -d '{"email":"cliente1@tienda.com","password":"password"}'
+
+# PASA: otro usuario, desde la misma IP, entra sin problema  ->  200
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/api/login \
+  -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
+  -d '{"email":"cliente2@tienda.com","password":"password"}'
+
+# FALLA: 4 pedidos seguidos de cliente1  ->  201 201 201 429
+curl -s -o /dev/null -w '%{http_code}\n' -X POST 'http://127.0.0.1:8000/api/pedidos?[1-4]' \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
+  -d '{"items":[{"producto_id":6,"cantidad":1}]}'
+
+# PASA: cliente2 (misma IP) todavía puede crear su pedido  ->  201
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/api/pedidos \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN2" -H 'Content-Type: application/json' \
+  -d '{"items":[{"producto_id":6,"cantidad":1}]}'
+
+# FALLA: 65 peticiones seguidas de cliente1 a la API  ->  60 x 200 y 5 x 429
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" \
+  'http://127.0.0.1:8000/api/productos?[1-65]' | sort | uniq -c
+
+# FALLA: sin token también cuenta (por API key): 62 peticiones a una ruta privada  ->  60 x 401 y 2 x 429
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-API-KEY: TU_API_KEY' \
+  'http://127.0.0.1:8000/api/perfil?[1-62]' | sort | uniq -c
+```
+
+### Colección de Postman
+
+`docs/tienda-api.postman_collection.json` trae los 7 endpoints en 4 carpetas (una por concepto) y cada request incluye
+tests que verifican el código esperado (`401`, `403`, `429`...).
+
+1. Postman → **Import** → el archivo.
+2. En las variables de la colección: `base_url` (por omisión `http://127.0.0.1:8000`; con el túnel, la URL
+   `https://....trycloudflare.com` sin `/` al final) y `api_key`. `token` y `user_id` se llenan solas con los requests de Login.
+3. **Run collection** en orden: todo debe salir en verde. Los 3 requests de la carpeta "4 · Rate limiter" son para
+   repetirlos (Runner con 6, 4 y 61 iteraciones) hasta ver el `429`.
+
+### Cómo demostrarlo en vivo
+
+1. Antes de empezar: `php artisan cache:clear` para dejar los contadores en cero.
+2. Frontend, entra como `cliente1` y pulsa **Crear pedido** cuatro veces seguidas: los 3 primeros dan `201` (el panel
+   muestra `X-RateLimit-Remaining: 2, 1, 0`) y el cuarto da `429`: aparece un aviso arriba con el mensaje y una cuenta
+   regresiva, y el panel muestra `Retry-After`.
+3. Tarjeta **Probar el rate limiter**: `GET /api/productos` × 65 termina en `200 × 60 · 429 × 5`.
+4. Misma tarjeta con **login** × 8: `401 × 5 · 429 × 3`. Mientras tanto la sesión real sigue funcionando: el bloqueo es
+   del email falso, no de la API.
+5. **No usa la IP**: con `cliente1` ya bloqueado en pedidos, entra como `cliente2` (o usa Postman con otro token):
+   puede crear pedidos aunque toda la conexión llegue desde `127.0.0.1` por el túnel.
+6. En Postman, Runner sobre "Listar productos" con 61 iteraciones: la última es `429` con `Retry-After`.
+7. Los contadores están en la base: `select key, expiration from cache;` (las llaves van hasheadas). `php artisan cache:clear` los borra.
+8. Código para mostrar: `AppServiceProvider` (los tres limitadores) y `routes/api.php` (qué ruta usa cuál).

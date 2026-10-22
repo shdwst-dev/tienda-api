@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use RuntimeException;
 use stdClass;
+use Throwable;
 
 class JwtService
 {
@@ -55,11 +56,31 @@ class JwtService
      * Verifica firma y vigencia y regresa los claims. El algoritmo lo fija el servidor
      * (no el header del token), así que "alg: none" o cambiar de algoritmo no sirve.
      *
-     * @throws \Throwable si el token está expirado, mal firmado o mal formado
+     * @throws Throwable si el token está expirado, mal firmado o mal formado
      */
     public function decodificar(string $token): stdClass
     {
         return JWT::decode($token, new Key($this->secreto, self::ALGORITMO));
+    }
+
+    /**
+     * Id del dueño de un token válido (firma y vigencia), o null si no hay token o no sirve.
+     * No consulta la base de datos ni la lista negra: solo sirve para identificar quién pide,
+     * por ejemplo como llave del rate limiter. La autenticación real la hace AuthenticateJwt.
+     */
+    public function usuarioDeToken(?string $token): ?int
+    {
+        if (! $token) {
+            return null;
+        }
+
+        try {
+            $claims = $this->decodificar($token);
+        } catch (Throwable) {
+            return null;
+        }
+
+        return isset($claims->sub) && ctype_digit((string) $claims->sub) ? (int) $claims->sub : null;
     }
 
     /**

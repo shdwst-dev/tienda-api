@@ -1,0 +1,1130 @@
+{
+  "info": {
+    "_postman_id": "6f1d2c9e-3b6a-4d7e-9a52-7c1e4b0a8f31",
+    "name": "Tienda API",
+    "description": "Mini tienda de aparatos electrónicos (Laravel 13 + PostgreSQL). Un folder por concepto de seguridad.\n\n**Antes de empezar**\n1. En las variables de la colección pon `base_url` (sin `/` al final; por ejemplo `http://127.0.0.1:8000` o la URL de Cloudflare Tunnel) y `api_key` (el valor de `API_KEY` del `.env` del servidor).\n2. `token` se llena sola al hacer login (los requests de Login guardan el JWT en esta variable); `user_id` también.\n3. Corre la colección en orden (Runner): cada request lleva tests con el código esperado (401, 403, 429...).\n4. Los requests del folder 4 son para repetirlos (Runner con N iteraciones o Send varias veces).\n5. Para empezar de cero: `php artisan migrate:fresh --seed`; para reiniciar solo los contadores del rate limiter: `php artisan cache:clear`.\n\nUsuarios de prueba (contraseña `password`): `admin@tienda.com`, `cliente1@tienda.com` (pedidos 1 y 2), `cliente2@tienda.com` (pedidos 3 y 4).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1 · API key",
+      "description": "Sin la llave correcta en el header X-API-KEY ninguna ruta de /api responde.",
+      "item": [
+        {
+          "name": "Productos · sin API key (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "No manda el header `X-API-KEY`. Esperado: **401** `API key ausente o inválida.`"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: API key\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"API key\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Productos · API key incorrecta (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "clave-incorrecta",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "Manda una llave equivocada. Esperado: **401**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Productos · con API key (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "Llave correcta. Esperado: **200** con la lista de productos (esta ruta no necesita token)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Es una lista con productos\", function () {",
+                  "    const lista = pm.response.json();",
+                  "    pm.expect(lista).to.be.a(\"array\");",
+                  "    pm.expect(lista.length).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · JWT",
+      "description": "Login con token firmado (HS256), expiración y revocación en el logout.",
+      "item": [
+        {
+          "name": "Login cliente1 (guarda {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Credenciales correctas. Esperado: **200** con `token`, `token_type`, `expires_in` y `user`. El test guarda el JWT en la variable `token`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"cliente1@tienda.com\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login correcto (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "",
+                  "    pm.test(\"Trae un JWT de 3 partes y expires_in\", function () {",
+                  "        pm.expect(json.token).to.be.a(\"string\");",
+                  "        pm.expect(json.token.split(\".\")).to.have.lengthOf(3);",
+                  "        pm.expect(json.token_type).to.eql(\"Bearer\");",
+                  "        pm.expect(json.expires_in).to.be.a(\"number\");",
+                  "    });",
+                  "",
+                  "    pm.collectionVariables.set(\"token\", json.token);",
+                  "    pm.collectionVariables.set(\"user_id\", json.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login · credenciales inválidas (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Usa un email que no existe para no gastar los intentos de un usuario real. Esperado: **401** `Credenciales inválidas.`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"atacante@tienda.com\",\n  \"password\": \"incorrecta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: Credenciales\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"Credenciales\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil · token válido (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/perfil",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "perfil"
+              ]
+            },
+            "description": "Devuelve el usuario dueño del token (ya no se manda `user_id`). Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Es el usuario del token\", function () {",
+                  "    pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get(\"user_id\")));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil · sin token (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/perfil",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "perfil"
+              ]
+            },
+            "description": "No manda `Authorization`. Esperado: **401** `Falta el token`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: Falta el token\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"Falta el token\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil · token falsificado (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sIjoiYWRtaW4ifQ.firma-falsa",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/perfil",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "perfil"
+              ]
+            },
+            "description": "Token que dice ser el admin (`sub` 1, `rol` admin) pero con la firma inventada. Esperado: **401** `Token inválido.`"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: Token inválido\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"Token inválido\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout (revoca el token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "logout"
+              ]
+            },
+            "description": "Mete el `jti` del token en la lista negra hasta que expire. Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil · token revocado (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/perfil",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "perfil"
+              ]
+            },
+            "description": "Reusa el token que acaba de revocar el logout. Esperado: **401** `Token revocado.`"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: Token revocado\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"Token revocado\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · BOLA/IDOR y roles",
+      "description": "Un cliente solo ve sus pedidos, el admin ve todos, y solo el admin crea productos.",
+      "item": [
+        {
+          "name": "Login cliente1 (guarda {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Vuelve a entrar como cliente1 (el token anterior fue revocado). Guarda el JWT en `token`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"cliente1@tienda.com\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login correcto (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "",
+                  "    pm.test(\"Trae un JWT de 3 partes y expires_in\", function () {",
+                  "        pm.expect(json.token).to.be.a(\"string\");",
+                  "        pm.expect(json.token.split(\".\")).to.have.lengthOf(3);",
+                  "        pm.expect(json.token_type).to.eql(\"Bearer\");",
+                  "        pm.expect(json.expires_in).to.be.a(\"number\");",
+                  "    });",
+                  "",
+                  "    pm.collectionVariables.set(\"token\", json.token);",
+                  "    pm.collectionVariables.set(\"user_id\", json.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido 1 · propio (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos/1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos",
+                "1"
+              ]
+            },
+            "description": "cliente1 pide su propio pedido. Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Trae los productos del pedido\", function () {",
+                  "    pm.expect(pm.response.json().items).to.be.a(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido 3 · de otro usuario, BOLA (403)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos/3",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos",
+                "3"
+              ]
+            },
+            "description": "cliente1 pide el pedido 3, que es de cliente2. Esperado: **403** `No tienes permiso para ver este pedido.`"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: No tienes permiso\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"No tienes permiso\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido · user_id ajeno en el body se ignora (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos"
+              ]
+            },
+            "description": "Manda `user_id: 3` (cliente2) en el body. Esperado: **201** y el pedido queda a nombre del dueño del token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": 3,\n  \"items\": [\n    {\n      \"producto_id\": 6,\n      \"cantidad\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"El pedido quedó a nombre del dueño del token, no del user_id del body\", function () {",
+                  "    pm.expect(pm.response.json().user_id).to.eql(Number(pm.collectionVariables.get(\"user_id\")));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto · cliente (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "Un cliente intenta crear un producto. Esperado: **403** `No tienes permiso para esta acción.`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test(\"El mensaje menciona: No tienes permiso\", function () {",
+                  "    pm.expect(pm.response.json().message).to.include(\"No tienes permiso\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login admin (guarda {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Entra como admin. Guarda el JWT en `token`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@tienda.com\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login correcto (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "",
+                  "    pm.test(\"Trae un JWT de 3 partes y expires_in\", function () {",
+                  "        pm.expect(json.token).to.be.a(\"string\");",
+                  "        pm.expect(json.token.split(\".\")).to.have.lengthOf(3);",
+                  "        pm.expect(json.token_type).to.eql(\"Bearer\");",
+                  "        pm.expect(json.expires_in).to.be.a(\"number\");",
+                  "    });",
+                  "",
+                  "    pm.collectionVariables.set(\"token\", json.token);",
+                  "    pm.collectionVariables.set(\"user_id\", json.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido 3 · el admin ve todos (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos/3",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos",
+                "3"
+              ]
+            },
+            "description": "El admin sí puede ver el pedido de cliente2. Esperado: **200**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto · admin (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "El admin crea un producto. Esperado: **201**.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Webcam HD\",\n  \"descripcion\": \"1080p con micrófono\",\n  \"precio\": 599,\n  \"stock\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 · Rate limiter",
+      "description": "Para repetir: usa el Runner con N iteraciones sobre el request, o dale Send varias veces seguidas. Los tests aceptan tanto el código normal como el 429.",
+      "item": [
+        {
+          "name": "Login incorrecto · repetir 6 veces (401 → 429)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Límite `login`: **5 por minuto** por email + API key. Los primeros 5 intentos dan **401**; del sexto en adelante **429** en JSON con `Retry-After`. Usa un email falso para no bloquear a un usuario real (con un email real quedaría bloqueado un minuto aunque pongas la contraseña correcta).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"atacante@tienda.com\",\n  \"password\": \"incorrecta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 (intento normal) o 429 (límite alcanzado)\", function () {",
+                  "    pm.expect([401, 429]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 429) {",
+                  "    pm.test(\"El 429 trae Retry-After y retry_after\", function () {",
+                  "        pm.expect(pm.response.headers.get(\"Retry-After\")).to.be.a(\"string\");",
+                  "        pm.expect(pm.response.json().retry_after).to.be.a(\"number\");",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido · repetir 4 veces (201 → 429)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pedidos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pedidos"
+              ]
+            },
+            "description": "Límite `pedidos`: **3 por minuto** por usuario (el del token; usa el token que haya guardado el último login). Los primeros 3 dan **201**, el cuarto **429**. Otro usuario, aunque llegue desde la misma IP, tiene su propia cuota.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"producto_id\": 6,\n      \"cantidad\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 (dentro del límite) o 429 (límite alcanzado)\", function () {",
+                  "    pm.expect([201, 429]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 429) {",
+                  "    pm.test(\"El 429 trae Retry-After y retry_after\", function () {",
+                  "        pm.expect(pm.response.headers.get(\"Retry-After\")).to.be.a(\"string\");",
+                  "        pm.expect(pm.response.json().retry_after).to.be.a(\"number\");",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar productos · repetir 61 veces (200 → 429)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/productos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "productos"
+              ]
+            },
+            "description": "Límite `api`: **60 por minuto** por usuario del token o, si no hay token, por API key. Esta petición no manda token, así que cuenta por API key: la 61 responde **429**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 (dentro del límite) o 429 (límite alcanzado)\", function () {",
+                  "    pm.expect([200, 429]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 429) {",
+                  "    pm.test(\"El 429 trae Retry-After y retry_after\", function () {",
+                  "        pm.expect(pm.response.headers.get(\"Retry-After\")).to.be.a(\"string\");",
+                  "        pm.expect(pm.response.json().retry_after).to.be.a(\"number\");",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

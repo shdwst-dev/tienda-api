@@ -6,15 +6,13 @@ use App\Models\User;
 use App\Services\JwtService;
 use Closure;
 use Firebase\JWT\ExpiredException;
-use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
-// AuthenticatesRequests hace que Laravel lo ordene antes del rate limiter y del route model binding.
-class AuthenticateJwt implements AuthenticatesRequests
+class AuthenticateJwt
 {
     public function __construct(private JwtService $jwt) {}
 
