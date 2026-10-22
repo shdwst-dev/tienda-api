@@ -1,58 +1,128 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Tienda API — Seguridad de API con Laravel
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Tarea de Seguridad Informática (UPQ). Mini tienda de aparatos electrónicos: API REST en **Laravel 13 + PostgreSQL**
+con un frontend simple en Blade + `fetch()` (sin Vite ni npm).
 
-## About Laravel
+El proyecto se construye por etapas. Cada concepto de seguridad vive en su propia rama, se une a `master` con
+`git merge --no-ff` y queda marcado con un tag, así que se puede viajar entre etapas con `git checkout <tag>`:
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+| Tag | Rama | Qué agrega |
+|-----|------|------------|
+| `v1-base` | `master` | API base y frontend, funcional pero **vulnerable a propósito** |
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Puesta en marcha
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install
+cp .env.example .env
+php artisan key:generate
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Configura PostgreSQL en el `.env` (la base `tienda_api` debe existir):
 
-## Contributing
+```dotenv
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=tienda_api
+DB_USERNAME=tu_usuario
+DB_PASSWORD=tu_password
+CACHE_STORE=database
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Crea las tablas con datos de prueba y levanta el servidor:
 
-## Code of Conduct
+```bash
+php artisan migrate:fresh --seed
+php artisan serve        # http://127.0.0.1:8000
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+El frontend está en `http://127.0.0.1:8000/` y la API en `http://127.0.0.1:8000/api`.
+Los ejemplos de abajo usan `curl` y `jq` (opcional, solo para ver el JSON bonito).
 
-## Security Vulnerabilities
+### Usuarios de prueba
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Contraseña de todos: `password`.
 
-## License
+| Email | Rol | Pedidos |
+|-------|-----|---------|
+| `admin@tienda.com` | `admin` | — |
+| `cliente1@tienda.com` | `cliente` | 1 y 2 |
+| `cliente2@tienda.com` | `cliente` | 3 y 4 |
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Además hay 8 productos electrónicos (ids 1 a 8). `migrate:fresh --seed` deja todo como al inicio.
+
+### Endpoints
+
+| Método | Ruta | Qué hace | Acceso |
+|--------|------|----------|--------|
+| POST | `/api/login` | Valida credenciales y regresa el usuario | Público |
+| GET | `/api/perfil?user_id=X` | Datos del usuario `X` | Público |
+| GET | `/api/productos` | Lista de productos | Público |
+| POST | `/api/productos` | Crea un producto | Público |
+| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | Público |
+| POST | `/api/pedidos` | Crea un pedido (`user_id` + `items`) | Público |
+
+Las rutas de `routes/api.php` se registran a mano en `bootstrap/app.php` (no se usó `php artisan install:api`,
+así que no hay Sanctum ni Passport).
+
+---
+
+## Etapa 1 — API base, vulnerable a propósito (`v1-base`)
+
+Es el punto de partida: todo funciona, pero **nada está protegido**. Sirve para mostrar el "antes" de cada concepto.
+
+### Qué está mal (a propósito)
+
+| Problema | Dónde | Qué permite |
+|----------|-------|-------------|
+| BOLA / IDOR | `GET /api/pedidos/{id}` | Ver el pedido de cualquier persona solo cambiando el id |
+| Perfil sin dueño | `GET /api/perfil?user_id=X` | Ver los datos de cualquier usuario |
+| Sin control de roles | `POST /api/productos` | Cualquiera (incluso sin cuenta) crea productos |
+| Confía en el cliente | `POST /api/pedidos` | Crear pedidos a nombre de otro usuario con `user_id` en el body |
+| Sin autenticación | todos | `login` solo valida credenciales, no hay sesión ni token |
+| Sin límite de peticiones | todos | Fuerza bruta al login, scraping, spam de pedidos |
+
+### Archivos
+
+- `bootstrap/app.php`: registra `routes/api.php` y devuelve los errores de `/api` como JSON corto (sin trace aunque `APP_DEBUG=true`).
+- `routes/api.php`, `routes/web.php`: rutas de la API y la ruta `/` del frontend.
+- `app/Http/Controllers/AuthController.php`, `ProductoController.php`, `PedidoController.php`.
+- `app/Models/`: `User` (con `rol`), `Producto`, `Pedido`, `PedidoProducto`.
+- `database/migrations/`: `productos`, `pedidos`, `pedido_productos` y la columna `rol` (`cliente` o `admin`) en `users`.
+- `database/seeders/`: usuarios, productos y 2 pedidos por cliente.
+- `resources/views/tienda.blade.php`: el frontend completo (HTML + CSS + JS en una sola vista).
+
+### Pruebas con curl (aquí los ataques FUNCIONAN)
+
+```bash
+# 1) IDOR: ver el pedido 3 (de cliente2) sin autenticarse  ->  200 con todo el pedido
+curl -s http://127.0.0.1:8000/api/pedidos/3 | jq
+
+# 2) Perfil ajeno: datos del admin (id 1)  ->  200
+curl -s 'http://127.0.0.1:8000/api/perfil?user_id=1' | jq
+
+# 3) Crear un producto sin ser admin ni tener cuenta  ->  201
+curl -s -X POST http://127.0.0.1:8000/api/productos \
+  -H 'Content-Type: application/json' \
+  -d '{"nombre":"Producto pirata","descripcion":"lo cree sin permiso","precio":1,"stock":999}' | jq
+
+# 4) Pedido a nombre de otro usuario (user_id 3 = cliente2)  ->  201
+curl -s -X POST http://127.0.0.1:8000/api/pedidos \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":3,"items":[{"producto_id":6,"cantidad":1}]}' | jq
+
+# 5) Sin límite de peticiones: 100 seguidas  ->  100 respuestas 200
+curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8000/api/productos?[1-100]' | sort | uniq -c
+```
+
+### Cómo demostrarlo en vivo
+
+1. Abre `http://127.0.0.1:8000/`: se ve la lista de productos y la etiqueta **v1-base · sin seguridad**.
+2. Entra como `cliente1` y consulta el pedido `1` (suyo) con "Ver pedido por id".
+3. Cambia el id a `3` (de `cliente2`): **se ve completo**. Eso es BOLA/IDOR.
+4. En "Crear pedido" cambia el `user_id` a `3`: el pedido se crea a nombre de otra persona.
+5. Crea un producto desde el formulario aunque seas un simple cliente: devuelve `201`.
+6. Corre el bucle de 100 peticiones del punto 5: todas responden `200`, nadie frena nada.
+
+En las siguientes etapas se repiten estos mismos pasos y cada uno empieza a fallar con `401`, `403` o `429`.
