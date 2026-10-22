@@ -9,6 +9,7 @@ El proyecto se construye por etapas. Cada concepto de seguridad vive en su propi
 | Tag | Rama | Qué agrega |
 |-----|------|------------|
 | `v1-base` | `master` | API base y frontend, funcional pero **vulnerable a propósito** |
+| `v2-api-key` | `01-api-key` | API key: header `X-API-KEY` obligatorio en toda la API |
 
 ## Puesta en marcha
 
@@ -28,6 +29,12 @@ DB_DATABASE=tienda_api
 DB_USERNAME=tu_usuario
 DB_PASSWORD=tu_password
 CACHE_STORE=database
+```
+
+Genera la API key que van a usar los clientes (header `X-API-KEY`) y ponla en el `.env`:
+
+```bash
+openssl rand -hex 24      # copia el resultado en API_KEY=
 ```
 
 Crea las tablas con datos de prueba y levanta el servidor:
@@ -56,12 +63,12 @@ Además hay 8 productos electrónicos (ids 1 a 8). `migrate:fresh --seed` deja t
 
 | Método | Ruta | Qué hace | Acceso |
 |--------|------|----------|--------|
-| POST | `/api/login` | Valida credenciales y regresa el usuario | Público |
-| GET | `/api/perfil?user_id=X` | Datos del usuario `X` | Público |
-| GET | `/api/productos` | Lista de productos | Público |
-| POST | `/api/productos` | Crea un producto | Público |
-| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | Público |
-| POST | `/api/pedidos` | Crea un pedido (`user_id` + `items`) | Público |
+| POST | `/api/login` | Valida credenciales y regresa el usuario | API key |
+| GET | `/api/perfil?user_id=X` | Datos del usuario `X` | API key |
+| GET | `/api/productos` | Lista de productos | API key |
+| POST | `/api/productos` | Crea un producto | API key |
+| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | API key |
+| POST | `/api/pedidos` | Crea un pedido (`user_id` + `items`) | API key |
 
 Las rutas de `routes/api.php` se registran a mano en `bootstrap/app.php` (no se usó `php artisan install:api`,
 así que no hay Sanctum ni Passport).
@@ -95,6 +102,9 @@ Es el punto de partida: todo funciona, pero **nada está protegido**. Sirve para
 
 ### Pruebas con curl (aquí los ataques FUNCIONAN)
 
+Estos comandos son de la etapa 1 (`git checkout v1-base`). Desde la etapa 2 hay que agregar
+`-H 'X-API-KEY: TU_API_KEY'` a cada uno, si no responden `401`.
+
 ```bash
 # 1) IDOR: ver el pedido 3 (de cliente2) sin autenticarse  ->  200 con todo el pedido
 curl -s http://127.0.0.1:8000/api/pedidos/3 | jq
@@ -126,3 +136,73 @@ curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8000/api/productos?[1
 6. Corre el bucle de 100 peticiones del punto 5: todas responden `200`, nadie frena nada.
 
 En las siguientes etapas se repiten estos mismos pasos y cada uno empieza a fallar con `401`, `403` o `429`.
+
+---
+
+## Etapa 2 — API key (`v2-api-key`, rama `01-api-key`)
+
+### Qué ataque previene
+
+El acceso anónimo a la API: bots, scrapers y cualquier programa que no sea un cliente autorizado ya no llegan a
+ningún endpoint; sin la llave reciben `401` antes de que se ejecute cualquier lógica.
+
+Una API key identifica a la **aplicación cliente**, no a la persona. No sustituye al login (eso es el JWT de la
+etapa 3) y tiene límites que conviene decir en la exposición:
+
+- Es un secreto compartido: si se filtra, vale para todos. Se rota cambiando `API_KEY` en el `.env`.
+- En un navegador no puede ser secreta (DevTools la muestra). Por eso el frontend **no** la trae incrustada en el
+  HTML (cualquiera que abra el sitio la vería): se pega a mano en el campo "API key" y queda en `localStorage`.
+
+### Cómo funciona
+
+1. El cliente manda el header `X-API-KEY: <llave>`.
+2. El middleware `ValidateApiKey` lo compara con `config('services.api_key')` (que sale de `API_KEY` en el `.env`)
+   con `hash_equals`, una comparación en tiempo constante que no filtra la llave por tiempos de respuesta.
+3. Falta o no coincide: `401` en JSON. Si el servidor no tiene `API_KEY` configurada: `500`. Falla cerrado, nunca
+   deja pasar a nadie por omisión.
+4. Se registra en el grupo `api` de `bootstrap/app.php`, así que protege **todas** las rutas `/api`, también las
+   que se agreguen después, y corre antes que cualquier otro middleware del grupo.
+
+### Archivos que se tocaron
+
+- `app/Http/Middleware/ValidateApiKey.php` (nuevo): el middleware.
+- `bootstrap/app.php`: `$middleware->api(prepend: [ValidateApiKey::class])`.
+- `config/services.php`: `'api_key' => env('API_KEY')`.
+- `.env` y `.env.example`: variable `API_KEY`.
+- `resources/views/tienda.blade.php`: campo "API key" y header `X-API-KEY` en cada `fetch()`.
+
+### Pruebas con curl (falla vs. pasa)
+
+Reemplaza `TU_API_KEY` por el valor de `API_KEY` de tu `.env`.
+
+```bash
+# FALLA: sin API key  ->  401 {"message":"API key ausente o inválida."}
+curl -i http://127.0.0.1:8000/api/productos
+
+# FALLA: API key incorrecta  ->  401
+curl -i -H 'X-API-KEY: clave-incorrecta' http://127.0.0.1:8000/api/productos
+
+# FALLA: el login tampoco se salva  ->  401
+curl -i -X POST http://127.0.0.1:8000/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"cliente1@tienda.com","password":"password"}'
+
+# PASA: API key correcta  ->  200 con la lista de productos
+curl -i -H 'X-API-KEY: TU_API_KEY' http://127.0.0.1:8000/api/productos
+
+# PASA: login con la key  ->  200 con el usuario
+curl -s -X POST http://127.0.0.1:8000/api/login \
+  -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' \
+  -d '{"email":"cliente1@tienda.com","password":"password"}' | jq
+```
+
+La llave se revisa **antes** que todo lo demás: pedir un pedido que no existe responde `401` sin llave y `404` con
+llave, así que sin la llave ni siquiera se puede "tantear" qué hay en la API.
+
+### Cómo demostrarlo en vivo
+
+1. Abre el frontend sin llave: la tabla de productos no carga y el panel muestra `401 API key ausente o inválida`.
+2. Escribe una llave equivocada en el campo "API key": sigue el `401`.
+3. Pega la correcta: aparecen los productos y todo lo demás vuelve a funcionar.
+4. En Postman: `GET /api/productos` sin el header da `401`; con `X-API-KEY` da `200`.
+5. Muestra el código: una línea en `bootstrap/app.php` y los 15 renglones de `ValidateApiKey`.
