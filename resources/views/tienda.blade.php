@@ -25,6 +25,7 @@
         .ancho { grid-column: 1 / -1; }
         h2 { margin: 0 0 10px; font-size: 17px; }
         label { display: block; font-size: 13px; color: var(--suave); margin-bottom: 8px; }
+        textarea { resize: vertical; font: 12px/1.4 ui-monospace, monospace; word-break: break-all; }
         input, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 6px; font: inherit; color: var(--texto); background: #fff; }
         button { padding: 7px 14px; border: 0; border-radius: 6px; background: var(--acento); color: #fff; font: inherit; cursor: pointer; }
         button.secundario { background: #e8edf5; color: var(--texto); }
@@ -47,7 +48,7 @@
 <body>
 <header>
     <h1>Tienda de electrónicos</h1>
-    <span class="etiqueta">v2-api-key · X-API-KEY</span>
+    <span class="etiqueta">v3-jwt · API key + JWT</span>
 </header>
 
 <main>
@@ -75,15 +76,25 @@
                 <button type="button" class="secundario" data-usuario="cliente2@tienda.com">cliente2</button>
             </div>
         </form>
+        <div class="fila" style="margin-top: 8px;">
+            <button type="button" class="secundario" id="btn-logout" disabled>Cerrar sesión</button>
+        </div>
         <p class="suave" id="sesion-info">Sin sesión.</p>
     </section>
 
     <section class="tarjeta">
         <h2>Perfil</h2>
-        <label>user_id
-            <input id="perfil-user-id" type="number" min="1" value="1">
+        <p class="suave" style="margin-top: 0;">Es el del dueño del token: ya no se manda ningún <code>user_id</code>.</p>
+        <button type="button" id="btn-perfil">Ver mi perfil</button>
+    </section>
+
+    <section class="tarjeta ancho" id="tarjeta-token" hidden>
+        <h2>Token JWT</h2>
+        <label>Se manda en cada petición como <code>Authorization: Bearer &lt;token&gt;</code> (se guarda en <code>sessionStorage</code>)
+            <textarea id="token-texto" rows="3" readonly></textarea>
         </label>
-        <button type="button" id="btn-perfil">Ver perfil</button>
+        <p class="suave" style="margin-top: 0;">Claims (decodificados aquí solo para mostrarlos; la firma la verifica el servidor):</p>
+        <pre id="token-claims"></pre>
     </section>
 
     <section class="tarjeta ancho">
@@ -166,13 +177,19 @@
         try { return JSON.parse(leer(tipo, clave)); } catch (e) { return null; }
     }
 
+    function borrar(tipo, clave) {
+        try { window[tipo].removeItem(clave); } catch (e) { /* nada que borrar */ }
+    }
+
     let usuario = leerJson('sessionStorage', 'usuario');
+    let token = leer('sessionStorage', 'token');
     let apiKey = leer('localStorage', 'apiKey') ?? '';
 
     function cabeceras(conCuerpo) {
         const h = { 'Accept': 'application/json' };
         if (conCuerpo) h['Content-Type'] = 'application/json';
         if (apiKey) h['X-API-KEY'] = apiKey;
+        if (token) h['Authorization'] = `Bearer ${token}`;
         return h;
     }
 
@@ -198,24 +215,60 @@
         }
     }
 
-    function pintarSesion() {
-        $('sesion-info').textContent = usuario
-            ? `Sesión de ${usuario.name} (${usuario.email}) · id ${usuario.id} · rol ${usuario.rol}`
-            : 'Sin sesión.';
-        if (usuario) {
-            $('perfil-user-id').value = usuario.id;
-            $('pedido-user-id').value = usuario.id;
+    // Solo para mostrar los claims: decodificar NO verifica nada, eso lo hace el servidor.
+    function claimsDe(jwt) {
+        try {
+            return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        } catch (e) {
+            return null;
         }
+    }
+
+    function pintarSesion() {
+        const activa = Boolean(usuario && token);
+        const claims = activa ? claimsDe(token) : null;
+
+        $('btn-logout').disabled = !activa;
+        $('tarjeta-token').hidden = !activa;
+
+        if (!activa) {
+            $('sesion-info').textContent = 'Sin sesión.';
+            return;
+        }
+
+        const expira = claims?.exp ? ` · el token expira a las ${new Date(claims.exp * 1000).toLocaleTimeString()}` : '';
+        $('sesion-info').textContent = `Sesión de ${usuario.name} (${usuario.email}) · id ${usuario.id} · rol ${usuario.rol}${expira}`;
+        $('token-texto').value = token;
+        $('token-claims').textContent = JSON.stringify(claims, null, 2);
+        $('pedido-user-id').value = usuario.id;
+    }
+
+    function iniciarSesion(datos) {
+        usuario = datos.user;
+        token = datos.token;
+        guardar('sessionStorage', 'usuario', JSON.stringify(usuario));
+        guardar('sessionStorage', 'token', token);
+        pintarSesion();
+    }
+
+    function limpiarSesion() {
+        usuario = null;
+        token = null;
+        borrar('sessionStorage', 'usuario');
+        borrar('sessionStorage', 'token');
+        pintarSesion();
     }
 
     async function login(e) {
         e.preventDefault();
         const r = await api('POST', '/login', { email: $('email').value, password: $('password').value });
-        if (!r.ok) return;
+        if (r.ok) iniciarSesion(r.datos);
+    }
 
-        usuario = r.datos.user;
-        guardar('sessionStorage', 'usuario', JSON.stringify(usuario));
-        pintarSesion();
+    async function logout() {
+        const r = await api('POST', '/logout');
+        // 200: el token quedó revocado. 401: ya no servía (expirado o revocado). En ambos casos se limpia.
+        if (r.ok || r.status === 401) limpiarSesion();
     }
 
     function celda(fila, texto) {
@@ -282,7 +335,7 @@
     }
 
     function verPerfil() {
-        api('GET', `/perfil?user_id=${encodeURIComponent($('perfil-user-id').value)}`);
+        api('GET', '/perfil');
     }
 
     async function crearProducto(e) {
@@ -310,6 +363,7 @@
     $('form-ver-pedido').addEventListener('submit', verPedido);
     $('form-producto').addEventListener('submit', crearProducto);
     $('btn-perfil').addEventListener('click', verPerfil);
+    $('btn-logout').addEventListener('click', logout);
     $('btn-pedido').addEventListener('click', crearPedido);
     $('btn-productos').addEventListener('click', () => cargarProductos());
 

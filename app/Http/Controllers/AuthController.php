@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\JwtService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -10,9 +11,9 @@ use Illuminate\Support\Facades\Hash;
 class AuthController extends Controller
 {
     /**
-     * Valida las credenciales y regresa el usuario (todavía sin token).
+     * Valida las credenciales y regresa un JWT firmado junto con el usuario.
      */
-    public function login(Request $request): JsonResponse
+    public function login(Request $request, JwtService $jwt): JsonResponse
     {
         $credenciales = $request->validate([
             'email' => ['required', 'email'],
@@ -25,19 +26,34 @@ class AuthController extends Controller
             return response()->json(['message' => 'Credenciales inválidas.'], 401);
         }
 
-        return response()->json(['user' => $user]);
+        $emitido = $jwt->emitir($user);
+
+        return response()->json([
+            'token' => $emitido['token'],
+            'token_type' => 'Bearer',
+            'expires_in' => $emitido['expires_in'],
+            'user' => $user,
+        ]);
     }
 
     /**
-     * VULNERABLE (v1): el id del usuario viene en la URL y nadie verifica
-     * que quien pregunta sea ese usuario, así que se puede consultar cualquier perfil.
+     * Revoca el token que se usó en esta petición: su jti entra a la lista negra
+     * hasta que el token habría expirado. Otros tokens del mismo usuario siguen vivos.
+     */
+    public function logout(Request $request, JwtService $jwt): JsonResponse
+    {
+        $claims = $request->attributes->get('jwt');
+
+        $jwt->revocar($claims->jti, (int) $claims->exp);
+
+        return response()->json(['message' => 'Sesión cerrada: el token quedó revocado.']);
+    }
+
+    /**
+     * El perfil es siempre el del dueño del token; ya no se recibe ningún user_id.
      */
     public function perfil(Request $request): JsonResponse
     {
-        $datos = $request->validate([
-            'user_id' => ['required', 'integer', 'min:1'],
-        ]);
-
-        return response()->json(User::findOrFail($datos['user_id']));
+        return response()->json($request->user());
     }
 }
