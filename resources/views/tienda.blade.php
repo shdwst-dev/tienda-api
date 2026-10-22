@@ -26,7 +26,7 @@
         h2 { margin: 0 0 10px; font-size: 17px; }
         label { display: block; font-size: 13px; color: var(--suave); margin-bottom: 8px; }
         textarea { resize: vertical; font: 12px/1.4 ui-monospace, monospace; word-break: break-all; }
-        input, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 6px; font: inherit; color: var(--texto); background: #fff; }
+        input, textarea, select { width: 100%; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 6px; font: inherit; color: var(--texto); background: #fff; }
         button { padding: 7px 14px; border: 0; border-radius: 6px; background: var(--acento); color: #fff; font: inherit; cursor: pointer; }
         button.secundario { background: #e8edf5; color: var(--texto); }
         button:disabled { opacity: .5; cursor: not-allowed; }
@@ -39,16 +39,19 @@
         td small { display: block; color: var(--suave); }
         td input { width: 80px; }
         code { background: #eef1f6; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
-        #estado { font-weight: 600; margin-bottom: 8px; }
+        #aviso { position: sticky; top: 0; z-index: 10; padding: 10px 20px; background: #fff4e5; border-bottom: 2px solid #b54708; color: #7a2e0e; font-weight: 600; }
+        #estado { font-weight: 600; margin-bottom: 4px; }
+        #cabeceras { margin: 0 0 8px; font-size: 13px; color: var(--suave); }
         #estado.ok { color: var(--ok); }
         #estado.error { color: var(--error); }
         pre { margin: 0; padding: 12px; background: #0f1724; color: #d7e3f4; border-radius: 8px; overflow: auto; max-height: 360px; font-size: 13px; }
     </style>
 </head>
 <body>
+<div id="aviso" role="alert" hidden></div>
 <header>
     <h1>Tienda de electrónicos</h1>
-    <span class="etiqueta">v4-bola-roles · BOLA + roles</span>
+    <span class="etiqueta">v5-rate-limiter · + rate limiter</span>
 </header>
 
 <main>
@@ -151,8 +154,27 @@
     </section>
 
     <section class="tarjeta ancho">
+        <h2>Probar el rate limiter</h2>
+        <div class="fila">
+            <label style="flex: 3 1 280px;">Petición que se repite
+                <select id="rafaga-tipo">
+                    <option value="productos">GET /api/productos (límite api: 60 por minuto)</option>
+                    <option value="perfil">GET /api/perfil (límite api: 60 por minuto)</option>
+                    <option value="login">POST /api/login con contraseña incorrecta (límite login: 5 por minuto)</option>
+                </select>
+            </label>
+            <label style="flex: 1 1 100px;">Cuántas veces
+                <input id="rafaga-n" type="number" min="1" max="200" value="65">
+            </label>
+        </div>
+        <button type="button" id="btn-rafaga">Disparar ráfaga</button>
+        <p class="suave">Con sesión el límite se cuenta por usuario; sin sesión, por API key. El login de la ráfaga usa un email falso para no bloquear a los usuarios de prueba. Para <code>POST /api/pedidos</code> (3 por minuto) basta con darle varias veces a "Crear pedido".</p>
+    </section>
+
+    <section class="tarjeta ancho">
         <h2>Última respuesta de la API</h2>
         <div id="estado">Todavía no hay peticiones.</div>
+        <div id="cabeceras"></div>
         <pre id="salida">{}</pre>
     </section>
 </main>
@@ -191,10 +213,32 @@
         return h;
     }
 
-    function mostrar(texto, ok, datos) {
+    function mostrar(texto, ok, datos, cabecerasTexto = '') {
         $('estado').textContent = texto;
         $('estado').className = ok ? 'ok' : 'error';
+        $('cabeceras').textContent = cabecerasTexto;
         $('salida').textContent = datos === undefined ? '' : JSON.stringify(datos, null, 2);
+    }
+
+    // 429: muestra el mensaje de la API en un aviso fijo con cuenta regresiva (Retry-After).
+    let temporizador = null;
+
+    function avisarLimite(mensaje, segundos) {
+        clearInterval(temporizador);
+        let restantes = segundos > 0 ? segundos : 5;
+        const pintar = () => { $('aviso').textContent = `${mensaje} (se desbloquea en ${restantes} s)`; };
+
+        $('aviso').hidden = false;
+        pintar();
+        temporizador = setInterval(() => {
+            restantes -= 1;
+            if (restantes <= 0) {
+                clearInterval(temporizador);
+                $('aviso').hidden = true;
+                return;
+            }
+            pintar();
+        }, 1000);
     }
 
     // silencioso: no pisa el panel "Última respuesta" (se usa al recargar la tabla de productos)
@@ -205,11 +249,18 @@
         try {
             const res = await fetch(API + ruta, opciones);
             const datos = await res.json().catch(() => null);
-            if (!silencioso) mostrar(`${metodo} ${API}${ruta} → ${res.status}`, res.ok, datos);
-            return { ok: res.ok, status: res.status, datos };
+            const limites = ['Retry-After', 'X-RateLimit-Limit', 'X-RateLimit-Remaining']
+                .filter((h) => res.headers.has(h))
+                .map((h) => `${h}: ${res.headers.get(h)}`)
+                .join(' · ');
+            const reintentar = Number(res.headers.get('Retry-After')) || 0;
+
+            if (res.status === 429) avisarLimite(datos?.message ?? 'Demasiadas peticiones.', reintentar);
+            if (!silencioso) mostrar(`${metodo} ${API}${ruta} → ${res.status}`, res.ok, datos, limites);
+            return { ok: res.ok, status: res.status, datos, reintentar };
         } catch (e) {
             mostrar(`${metodo} ${API}${ruta} → no se pudo conectar con la API`, false);
-            return { ok: false, status: 0, datos: null };
+            return { ok: false, status: 0, datos: null, reintentar: 0 };
         }
     }
 
@@ -349,6 +400,38 @@
         }
     }
 
+    // Repite una petición N veces seguidas y resume los códigos de respuesta (200 ... 429).
+    async function rafaga() {
+        const tipo = $('rafaga-tipo').value;
+        const total = Math.min(200, Math.max(1, Number($('rafaga-n').value) || 1));
+        const conteo = {};
+        let primer429 = null;
+        let reintentar = 0;
+
+        $('btn-rafaga').disabled = true;
+
+        for (let i = 1; i <= total; i++) {
+            const r = tipo === 'login'
+                ? await api('POST', '/login', { email: 'atacante@tienda.com', password: 'incorrecta' }, true)
+                : await api('GET', tipo === 'perfil' ? '/perfil' : '/productos', undefined, true);
+
+            conteo[r.status] = (conteo[r.status] ?? 0) + 1;
+            if (r.status === 429 && primer429 === null) {
+                primer429 = i;
+                reintentar = r.reintentar;
+            }
+        }
+
+        $('btn-rafaga').disabled = false;
+
+        const resumen = Object.entries(conteo).map(([codigo, n]) => `${codigo} × ${n}`).join(' · ');
+        mostrar(`Ráfaga de ${total} peticiones → ${resumen}`, primer429 === null, {
+            codigos: conteo,
+            primer_429_en_la_peticion: primer429,
+            retry_after: reintentar,
+        });
+    }
+
     $('api-key').value = apiKey;
     $('api-key').addEventListener('input', (e) => {
         apiKey = e.target.value.trim();
@@ -361,6 +444,7 @@
     $('form-producto').addEventListener('submit', crearProducto);
     $('btn-perfil').addEventListener('click', verPerfil);
     $('btn-logout').addEventListener('click', logout);
+    $('btn-rafaga').addEventListener('click', rafaga);
     $('btn-pedido').addEventListener('click', crearPedido);
     $('btn-productos').addEventListener('click', () => cargarProductos());
 
