@@ -37,6 +37,7 @@
         th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); }
         td small { display: block; color: var(--suave); }
         td input { width: 80px; }
+        code { background: #eef1f6; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
         #estado { font-weight: 600; margin-bottom: 8px; }
         #estado.ok { color: var(--ok); }
         #estado.error { color: var(--error); }
@@ -46,10 +47,18 @@
 <body>
 <header>
     <h1>Tienda de electrónicos</h1>
-    <span class="etiqueta">v1-base · sin seguridad</span>
+    <span class="etiqueta">v2-api-key · X-API-KEY</span>
 </header>
 
 <main>
+    <section class="tarjeta ancho">
+        <h2>API key</h2>
+        <label>Valor de <code>API_KEY</code> del servidor (se manda en el header <code>X-API-KEY</code> en cada petición)
+            <input id="api-key" autocomplete="off" spellcheck="false" placeholder="Pega aquí la API key">
+        </label>
+        <p class="suave" style="margin-top: 0;">No viene incrustada en la página a propósito: cualquiera que abra el sitio la vería.</p>
+    </section>
+
     <section class="tarjeta">
         <h2>Sesión</h2>
         <form id="form-login">
@@ -144,11 +153,26 @@
     const $ = (id) => document.getElementById(id);
     const dinero = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 
-    let usuario = JSON.parse(sessionStorage.getItem('usuario') || 'null');
+    // El almacenamiento del navegador puede estar bloqueado: nunca debe romper la página.
+    function leer(tipo, clave) {
+        try { return window[tipo].getItem(clave); } catch (e) { return null; }
+    }
+
+    function guardar(tipo, clave, valor) {
+        try { window[tipo].setItem(clave, valor); } catch (e) { /* se queda solo en memoria */ }
+    }
+
+    function leerJson(tipo, clave) {
+        try { return JSON.parse(leer(tipo, clave)); } catch (e) { return null; }
+    }
+
+    let usuario = leerJson('sessionStorage', 'usuario');
+    let apiKey = leer('localStorage', 'apiKey') ?? '';
 
     function cabeceras(conCuerpo) {
         const h = { 'Accept': 'application/json' };
         if (conCuerpo) h['Content-Type'] = 'application/json';
+        if (apiKey) h['X-API-KEY'] = apiKey;
         return h;
     }
 
@@ -190,7 +214,7 @@
         if (!r.ok) return;
 
         usuario = r.datos.user;
-        sessionStorage.setItem('usuario', JSON.stringify(usuario));
+        guardar('sessionStorage', 'usuario', JSON.stringify(usuario));
         pintarSesion();
     }
 
@@ -274,6 +298,13 @@
             cargarProductos(true);
         }
     }
+
+    $('api-key').value = apiKey;
+    $('api-key').addEventListener('input', (e) => {
+        apiKey = e.target.value.trim();
+        guardar('localStorage', 'apiKey', apiKey);
+    });
+    $('api-key').addEventListener('change', () => cargarProductos());
 
     $('form-login').addEventListener('submit', login);
     $('form-ver-pedido').addEventListener('submit', verPedido);

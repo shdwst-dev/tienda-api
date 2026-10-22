@@ -14,6 +14,9 @@ return [
     |
     */
 
+    // Llave que deben mandar los clientes en el header X-API-KEY (middleware ValidateApiKey).
+    'api_key' => env('API_KEY'),
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],
