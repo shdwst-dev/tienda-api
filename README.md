@@ -11,6 +11,7 @@ El proyecto se construye por etapas. Cada concepto de seguridad vive en su propi
 | `v1-base` | `master` | API base y frontend, funcional pero **vulnerable a propósito** |
 | `v2-api-key` | `01-api-key` | API key: header `X-API-KEY` obligatorio en toda la API |
 | `v3-jwt` | `02-jwt` | JWT: login con token firmado, expiración y revocación en el logout |
+| `v4-bola-roles` | `03-bola-roles` | BOLA/IDOR (`PedidoPolicy`), `user_id` tomado del token y roles (`rol:admin`) |
 
 ## Puesta en marcha
 
@@ -75,9 +76,9 @@ Además hay 8 productos electrónicos (ids 1 a 8). `migrate:fresh --seed` deja t
 | POST | `/api/logout` | Revoca el token que se usó en la petición | API key + JWT |
 | GET | `/api/perfil` | Datos del dueño del token | API key + JWT |
 | GET | `/api/productos` | Lista de productos | API key |
-| POST | `/api/productos` | Crea un producto | API key + JWT |
-| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | API key + JWT |
-| POST | `/api/pedidos` | Crea un pedido (`user_id` + `items`) | API key + JWT |
+| POST | `/api/productos` | Crea un producto | API key + JWT + rol `admin` |
+| GET | `/api/pedidos/{id}` | Detalle de un pedido con sus productos | API key + JWT (solo el dueño o un admin) |
+| POST | `/api/pedidos` | Crea un pedido (`items`) a nombre del dueño del token | API key + JWT |
 
 Las rutas de `routes/api.php` se registran a mano en `bootstrap/app.php` (no se usó `php artisan install:api`,
 así que no hay Sanctum ni Passport).
@@ -338,3 +339,105 @@ Token expirado: pon `JWT_TTL=1` en el `.env` (el servidor se reinicia solo al ca
 6. Entra en otra pestaña con el mismo usuario: su sesión no se afecta por el logout de la primera (revocación por sesión).
 7. Código para mostrar: `AuthenticateJwt` (los pasos en orden) y `JwtService`.
 8. Cierra con el hueco que queda: con el token de `cliente1`, `GET /api/pedidos/3` (de `cliente2`) todavía responde `200`.
+
+---
+
+## Etapa 4 — BOLA/IDOR y roles (`v4-bola-roles`, rama `03-bola-roles`)
+
+### Qué ataque previene
+
+- **BOLA / IDOR** (*Broken Object Level Authorization*, #1 del OWASP API Security Top 10): el atacante ya tiene un
+  token válido, pero cambia el id de un objeto en la URL (`/api/pedidos/3`) o un campo del body (`user_id`) para leer
+  o crear datos de **otra persona**. Autenticarse (etapa 3) no basta: hay que comprobar, en cada acceso, que el
+  objeto pertenezca a quien lo pide.
+- **Escalada de privilegios** (*BFLA*, *Broken Function Level Authorization*): un cliente usando una función de
+  administrador, como crear productos.
+
+### Cómo funciona
+
+1. `PedidoPolicy::view`: el admin puede ver cualquier pedido; un cliente solo si `pedido->user_id` es el suyo. Si no,
+   `403` con el mensaje "No tienes permiso para ver este pedido.".
+2. `PedidoController::show` llama a `Gate::authorize('view', $pedido)`. El route model binding ya cargó el pedido, así
+   que la comprobación se hace sobre el objeto real, no sobre el id que mandó el cliente.
+3. `PedidoController::store` **ignora** el `user_id` del body: el pedido se crea siempre a nombre de
+   `$request->user()`, el dueño del token.
+4. El middleware `RequireRole` (`rol:admin`) protege `POST /api/productos`: cualquier otro rol recibe `403`. Lee el
+   rol del usuario en la **base de datos**, no del claim `rol` del token, así que un cambio de rol (por ejemplo,
+   degradar a un admin) surte efecto de inmediato aunque su token siga vigente, y un claim inventado no sirve de nada.
+5. Códigos: `401` = no sé quién eres (falta o falla el token), `403` = sé quién eres pero no puedes hacer esto,
+   `404` = no existe.
+
+Notas que conviene mencionar:
+
+- Un `403` confirma que el pedido existe. Para no revelarlo se puede responder `404` con `Response::denyAsNotFound()`
+  en la policy; aquí se deja `403` porque es lo que se quiere demostrar.
+- Los ids secuenciales (1, 2, 3...) facilitan la enumeración. Usar UUID ayuda, pero **no** sustituye a la policy.
+- La columna `rol` no está en el `#[Fillable]` de `User`, así que no se puede asignar por mass assignment.
+
+### Archivos que se tocaron
+
+- `app/Policies/PedidoPolicy.php` (nuevo): `view`. Laravel la descubre sola por el nombre.
+- `app/Http/Middleware/RequireRole.php` (nuevo): `rol:admin`.
+- `app/Http/Controllers/PedidoController.php`: `Gate::authorize` en `show`; `store` usa el usuario del token.
+- `routes/api.php`: `->middleware('rol:admin')` en `POST /productos`.
+- `bootstrap/app.php`: alias `rol`.
+- `resources/views/tienda.blade.php`: se quitó el campo `user_id` de "Crear pedido".
+
+### Pruebas con curl (falla vs. pasa)
+
+Reemplaza `TU_API_KEY` por el valor de `API_KEY` de tu `.env`. Primero guarda un token por cada usuario:
+
+```bash
+# bash / zsh
+tienda_login() { curl -s -X POST http://127.0.0.1:8000/api/login -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"password\"}" | jq -r .token; }
+TOKEN1=$(tienda_login cliente1@tienda.com); TOKEN2=$(tienda_login cliente2@tienda.com); ADMIN=$(tienda_login admin@tienda.com)
+```
+
+```fish
+# fish
+function tienda_login; curl -s -X POST http://127.0.0.1:8000/api/login -H 'X-API-KEY: TU_API_KEY' -H 'Content-Type: application/json' -d "{\"email\":\"$argv[1]\",\"password\":\"password\"}" | jq -r .token; end
+set TOKEN1 (tienda_login cliente1@tienda.com); set TOKEN2 (tienda_login cliente2@tienda.com); set ADMIN (tienda_login admin@tienda.com)
+```
+
+```bash
+# FALLA (BOLA bloqueado): cliente1 pide el pedido 3, que es de cliente2  ->  403
+curl -i -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" http://127.0.0.1:8000/api/pedidos/3
+
+# FALLA: cliente2 pide el pedido 1, que es de cliente1  ->  403
+curl -i -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN2" http://127.0.0.1:8000/api/pedidos/1
+
+# PASA: cliente1 pide su propio pedido 1  ->  200
+curl -s -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" http://127.0.0.1:8000/api/pedidos/1 | jq
+
+# PASA: el admin puede ver el pedido 3  ->  200
+curl -s -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $ADMIN" http://127.0.0.1:8000/api/pedidos/3 | jq
+
+# FALLA: un cliente intenta crear un producto  ->  403 "No tienes permiso para esta acción."
+curl -i -X POST http://127.0.0.1:8000/api/productos \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Webcam HD","descripcion":"1080p","precio":599,"stock":12}'
+
+# PASA: el admin crea el producto  ->  201
+curl -s -X POST http://127.0.0.1:8000/api/productos \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Webcam HD","descripcion":"1080p","precio":599,"stock":12}' | jq
+
+# Ataque neutralizado: cliente1 manda user_id 3 en el body, pero el pedido queda a su nombre  ->  {"id":5,"user_id":2}
+curl -s -X POST http://127.0.0.1:8000/api/pedidos \
+  -H 'X-API-KEY: TU_API_KEY' -H "Authorization: Bearer $TOKEN1" -H 'Content-Type: application/json' \
+  -d '{"user_id":3,"items":[{"producto_id":6,"cantidad":1}]}' | jq -c '{id, user_id}'
+```
+
+### Cómo demostrarlo en vivo
+
+1. En el frontend entra como `cliente1` y consulta el pedido `1`: `200`. Cambia el id a `3`: **`403`** (en la etapa 1
+   este mismo paso mostraba el pedido completo de otra persona).
+2. Cierra sesión y entra como `admin`: el pedido `3` ahora sí se ve. El admin ve todos.
+3. Como `cliente1`, "Crear producto" responde `403 No tienes permiso para esta acción.`; como `admin`, `201`, y el
+   producto aparece en la tabla. Que el botón esté visible no importa: quien decide es el servidor.
+4. En Postman, con el token de `cliente1`, `POST /api/pedidos` con `"user_id": 3` en el body: la respuesta trae
+   `"user_id": 2`, el del token.
+5. Código para mostrar: `PedidoPolicy`, la línea `Gate::authorize('view', $pedido)` y `RequireRole`.
+6. Extra: el rol sale de la base de datos. Con un token de admin vigente, ejecuta
+   `update users set rol = 'cliente' where email = 'admin@tienda.com';` y repite `POST /api/productos`: ahora da
+   `403`. Para dejarlo como estaba: `update users set rol = 'admin' where email = 'admin@tienda.com';`.

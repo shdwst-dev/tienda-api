@@ -7,39 +7,41 @@ use App\Models\Producto;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 class PedidoController extends Controller
 {
     /**
-     * VULNERABLE (v1): BOLA/IDOR. Devuelve cualquier pedido por su id sin revisar
-     * a quién pertenece.
+     * BOLA/IDOR: PedidoPolicy::view solo deja pasar al dueño del pedido o a un admin (403 en otro caso).
      */
     public function show(Pedido $pedido): JsonResponse
     {
+        Gate::authorize('view', $pedido);
+
         return response()->json($pedido->load('items.producto'));
     }
 
     /**
-     * VULNERABLE (v1): confía en el user_id que manda el cliente en el body,
-     * así que se pueden crear pedidos a nombre de otra persona.
+     * El pedido siempre se crea a nombre del dueño del token: cualquier user_id del body se ignora.
      */
     public function store(Request $request): JsonResponse
     {
         $datos = $request->validate([
-            'user_id' => ['required', 'integer', 'exists:users,id'],
             'items' => ['required', 'array', 'min:1', 'max:50'],
             'items.*.producto_id' => ['required', 'integer', 'distinct', 'exists:productos,id'],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $pedido = DB::transaction(function () use ($datos) {
+        $userId = $request->user()->id;
+
+        $pedido = DB::transaction(function () use ($datos, $userId) {
             $productos = Producto::whereIn('id', array_column($datos['items'], 'producto_id'))
                 ->lockForUpdate()
                 ->get()
                 ->keyBy('id');
 
-            $pedido = Pedido::create(['user_id' => $datos['user_id'], 'estado' => 'pendiente']);
+            $pedido = Pedido::create(['user_id' => $userId, 'estado' => 'pendiente']);
             $total = 0;
 
             foreach ($datos['items'] as $item) {

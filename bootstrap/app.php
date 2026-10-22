@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AuthenticateJwt;
+use App\Http\Middleware\RequireRole;
 use App\Http\Middleware\ValidateApiKey;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,9 +20,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // Toda ruta /api exige la API key, antes que cualquier otro middleware del grupo.
         $middleware->api(prepend: [ValidateApiKey::class]);
 
-        // Se usa por ruta: ->middleware('jwt')
+        // Se usan por ruta: ->middleware('jwt') y ->middleware('rol:admin')
         $middleware->alias([
             'jwt' => AuthenticateJwt::class,
+            'rol' => RequireRole::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

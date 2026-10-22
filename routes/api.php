@@ -14,7 +14,7 @@ Route::middleware('jwt')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/perfil', [AuthController::class, 'perfil']);
 
-    Route::post('/productos', [ProductoController::class, 'store']);
+    Route::post('/productos', [ProductoController::class, 'store'])->middleware('rol:admin');
 
     Route::get('/pedidos/{pedido}', [PedidoController::class, 'show'])->where('pedido', '[0-9]{1,18}');
     Route::post('/pedidos', [PedidoController::class, 'store']);
